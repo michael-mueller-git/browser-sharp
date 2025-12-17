@@ -257,11 +257,16 @@ const applyPlyProjection = (plyCam, viewportWidth, viewportHeight) => {
   const { intrinsics, near, far } = plyCam;
   const sx = viewportWidth / intrinsics.imageWidth;
   const sy = viewportHeight / intrinsics.imageHeight;
+  const s = Math.min(sx, sy);
+  const scaledWidth = intrinsics.imageWidth * s;
+  const scaledHeight = intrinsics.imageHeight * s;
+  const offsetX = (viewportWidth - scaledWidth) * 0.5;
+  const offsetY = (viewportHeight - scaledHeight) * 0.5;
 
-  const fx = intrinsics.fx * sx;
-  const fy = intrinsics.fy * sy;
-  const cx = intrinsics.cx * sx;
-  const cy = intrinsics.cy * sy;
+  const fx = intrinsics.fx * s;
+  const fy = intrinsics.fy * s;
+  const cx = intrinsics.cx * s + offsetX;
+  const cy = intrinsics.cy * s + offsetY;
 
   camera.aspect = viewportWidth / viewportHeight;
   camera.fov = THREE.MathUtils.radToDeg(
