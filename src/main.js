@@ -1,31 +1,36 @@
 import "./style.css";
 import * as THREE from "three";
-import {
-  SparkRenderer,
-  SplatMesh,
-  SplatFileType,
-} from "@sparkjsdev/spark";
+import { SparkRenderer } from "@sparkjsdev/spark";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { readPlyCamera } from "./plyCamera.js";
+import {
+  getFormatAccept,
+  getFormatHandler,
+  getSupportedExtensions,
+  getSupportedLabel,
+} from "./formats/index.js";
 
 const app = document.querySelector("#app");
+const supportedLabel = getSupportedLabel();
+const formatAccept = getFormatAccept();
+const supportedExtensions = getSupportedExtensions();
+const supportedExtensionsText = supportedExtensions.join(", ");
 
 app.innerHTML = `
   <div class="page">
     <div id="viewer" class="viewer">
       <div class="drop-help">
-        <div class="eyebrow">拖拽 PLY 文件到这里</div>
+        <div class="eyebrow">拖拽 ${supportedLabel} 文件到这里</div>
         <div class="fine-print">Spark + THREE 3DGS</div>
       </div>
     </div>
     <div class="side">
       <div class="header">
         <div>
-          <div class="title">3DGS PLY 上传</div>
+          <div class="title">3DGS 文件上传</div>
           <div class="subtitle">本地拖拽 / 选择文件 即刻查看</div>
         </div>
         <button id="pick-btn" class="primary">选择文件</button>
-        <input id="file-input" type="file" accept=".ply" hidden />
+        <input id="file-input" type="file" accept="${formatAccept}" hidden />
       </div>
       <div class="hint">导入后会在右侧打印调试信息，同时在左侧实时渲染。</div>
       <div class="debug">
@@ -121,13 +126,13 @@ grid.position.y = -0.5;
 scene.add(grid);
 
 let currentMesh = null;
-let activePlyCamera = null;
+let activeCamera = null;
 
 const resize = () => {
   const { clientWidth, clientHeight } = viewerEl;
   renderer.setSize(clientWidth, clientHeight, false);
-  if (activePlyCamera) {
-    applyPlyProjection(activePlyCamera, clientWidth, clientHeight);
+  if (activeCamera) {
+    applyCameraProjection(activeCamera, clientWidth, clientHeight);
   } else {
     camera.aspect = clientWidth / clientHeight;
     camera.updateProjectionMatrix();
@@ -253,8 +258,8 @@ const makeProjectionFromIntrinsics = ({
   );
 };
 
-const applyPlyProjection = (plyCam, viewportWidth, viewportHeight) => {
-  const { intrinsics, near, far } = plyCam;
+const applyCameraProjection = (cameraMetadata, viewportWidth, viewportHeight) => {
+  const { intrinsics, near, far } = cameraMetadata;
   const sx = viewportWidth / intrinsics.imageWidth;
   const sy = viewportHeight / intrinsics.imageHeight;
   const s = Math.min(sx, sy);
@@ -294,7 +299,7 @@ const applyPlyProjection = (plyCam, viewportWidth, viewportHeight) => {
   camera.projectionMatrixInverse.copy(projection).invert();
 };
 
-const applyPlyCamera = (mesh, plyCamera) => {
+const applyMetadataCamera = (mesh, cameraMetadata) => {
   const cvToThree = makeAxisFlipCvToGl();
   if (!mesh.userData.__cvToThreeApplied) {
     mesh.applyMatrix4(cvToThree);
@@ -302,7 +307,7 @@ const applyPlyCamera = (mesh, plyCamera) => {
   }
   mesh.updateMatrixWorld(true);
 
-  const e = plyCamera.extrinsicCv;
+  const e = cameraMetadata.extrinsicCv;
   const extrinsicCv = new THREE.Matrix4().set(
     e[0],
     e[1],
@@ -345,11 +350,11 @@ const applyPlyCamera = (mesh, plyCamera) => {
 
     const near = Math.max(0.01, dist - radius * 2.0);
     const far = Math.max(near + 1.0, dist + radius * 6.0);
-    activePlyCamera = { ...plyCamera, near, far };
+    activeCamera = { ...cameraMetadata, near, far };
 
     boundsEl.textContent = `${formatVec3(center)} | size ${formatVec3(size)}`;
   } else {
-    activePlyCamera = { ...plyCamera, near: 0.01, far: 1000 };
+    activeCamera = { ...cameraMetadata, near: 0.01, far: 1000 };
   }
 
   const depthFocusCv = computeMlSharpDepthFocus(mesh);
@@ -364,8 +369,8 @@ const applyPlyCamera = (mesh, plyCamera) => {
   resize();
 };
 
-const clearPlyCamera = () => {
-  activePlyCamera = null;
+const clearMetadataCamera = () => {
+  activeCamera = null;
   camera.matrixAutoUpdate = true;
   controls.enabled = true;
   controls.dampingFactor = defaultControls.dampingFactor;
@@ -395,8 +400,9 @@ const removeCurrentMesh = () => {
 
 const loadSplatFile = async (file) => {
   if (!file) return;
-  if (!file.name.toLowerCase().endsWith(".ply")) {
-    setStatus("只支持 .ply 3DGS 文件");
+  const formatHandler = getFormatHandler(file);
+  if (!formatHandler) {
+    setStatus(`只支持 ${supportedExtensionsText} 3DGS 文件`);
     return;
   }
 
@@ -405,36 +411,32 @@ const loadSplatFile = async (file) => {
     const start = performance.now();
     const bytes = new Uint8Array(await file.arrayBuffer());
 
-    let plyCamera = null;
+    let cameraMetadata = null;
     try {
-      plyCamera = await readPlyCamera(bytes);
-      if (plyCamera) {
+      cameraMetadata = await formatHandler.loadMetadata({ file, bytes });
+      if (cameraMetadata) {
+        const { intrinsics } = cameraMetadata;
         appendLog(
-          `相机: fx=${plyCamera.intrinsics.fx.toFixed(1)}, fy=${plyCamera.intrinsics.fy.toFixed(1)}, ` +
-            `cx=${plyCamera.intrinsics.cx.toFixed(1)}, cy=${plyCamera.intrinsics.cy.toFixed(1)}, ` +
-            `img=${plyCamera.intrinsics.imageWidth}x${plyCamera.intrinsics.imageHeight}`,
+          `${formatHandler.label} 相机: fx=${intrinsics.fx.toFixed(1)}, fy=${intrinsics.fy.toFixed(1)}, ` +
+            `cx=${intrinsics.cx.toFixed(1)}, cy=${intrinsics.cy.toFixed(1)}, ` +
+            `img=${intrinsics.imageWidth}x${intrinsics.imageHeight}`,
         );
       }
     } catch (error) {
-      appendLog(`相机参数解析失败，回退默认视角: ${error?.message ?? error}`);
+      appendLog(`相机元数据解析失败，回退默认视角: ${error?.message ?? error}`);
     }
 
-    setStatus("解析 PLY 并构建 splats...");
-    const mesh = new SplatMesh({
-      fileBytes: bytes,
-      fileType: SplatFileType.PLY,
-      fileName: file.name,
-    });
-    await mesh.initialized;
+    setStatus(`解析 ${formatHandler.label} 并构建 splats...`);
+    const mesh = await formatHandler.loadData({ file, bytes });
 
     removeCurrentMesh();
     currentMesh = mesh;
     viewerEl.classList.add("has-mesh");
     scene.add(mesh);
 
-    clearPlyCamera();
-    if (plyCamera) {
-      applyPlyCamera(mesh, plyCamera);
+    clearMetadataCamera();
+    if (cameraMetadata) {
+      applyMetadataCamera(mesh, cameraMetadata);
     } else {
       fitViewToMesh(mesh);
     }
@@ -443,8 +445,8 @@ const loadSplatFile = async (file) => {
     const loadMs = performance.now() - start;
     updateInfo({ file, mesh, loadMs });
     setStatus(
-      plyCamera
-        ? "加载完成（使用 PLY 相机：可拖拽旋转 / 滚轮缩放）"
+      cameraMetadata
+        ? "加载完成（使用文件相机：可拖拽旋转 / 滚轮缩放）"
         : "加载完成，拖拽鼠标旋转 / 滚轮缩放",
     );
     appendLog(
@@ -452,7 +454,7 @@ const loadSplatFile = async (file) => {
     );
   } catch (error) {
     console.error(error);
-    clearPlyCamera();
+    clearMetadataCamera();
     setStatus("加载失败，请检查文件或控制台日志");
   }
 };
