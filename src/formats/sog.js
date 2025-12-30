@@ -112,7 +112,6 @@ export const sogFormat = {
   id: "sog",
   label: "SOG",
   extensions: ["sog"],
-  colorSpace: "linear",
   async loadData({ file, bytes }) {
     const mesh = new SplatMesh({
       fileBytes: bytes,
