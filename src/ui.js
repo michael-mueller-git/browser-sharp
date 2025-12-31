@@ -23,8 +23,8 @@ export const initializeUI = () => {
       <div id="viewer" class="viewer">
         <div class="loading-overlay"><div class="loading-spinner"></div></div>
         <div class="drop-help">
-          <div class="eyebrow">Drag ${supportedLabel} files here</div>
-          <div class="fine-print">Spark + THREE 3DGS</div>
+          <div class="eyebrow">Drag ${supportedLabel} files or folders here</div>
+          <div class="fine-print">Drop multiple files to browse • Spark + THREE 3DGS</div>
         </div>
       </div>
       <button
@@ -69,15 +69,23 @@ export const initializeUI = () => {
             </div>
           </div>
           <div class="control-row bg-blur-controls" id="bg-blur-controls">
-            <span class="control-label">Background blur</span>
+            <span class="control-label">Bg blur</span>
             <div class="control-track">
-              <input type="range" id="bg-blur-slider" min="10" max="100" value="40" />
+              <input type="range" id="bg-blur-slider" min="0" max="100" value="40" />
               <span class="control-value" id="bg-blur-value">40px</span>
             </div>
           </div>
           <div class="settings-footer">
             <button id="recenter-btn" class="secondary">Recenter view</button>
+            <button id="auto-anchor-btn" class="secondary">Auto target</button>
           </div>
+        </div>
+        <div class="asset-gallery" id="asset-gallery">
+          <div class="asset-gallery-header">
+            <span class="settings-eyebrow">Assets</span>
+            <span class="asset-count" id="asset-count"></span>
+          </div>
+          <div class="asset-list" id="asset-list"></div>
         </div>
         <div class="log-panel" id="log-panel">
           <button
@@ -113,6 +121,7 @@ export let logEl;
 export let logPanelEl;
 export let logToggleBtn;
 export let recenterBtn;
+export let autoAnchorBtn;
 export let cameraRangeSliderEl;
 export let cameraRangeLabelEl;
 export let fovSliderEl;
@@ -120,6 +129,9 @@ export let fovValueEl;
 export let bgBlurControlsEl;
 export let bgBlurSlider;
 export let bgBlurValue;
+export let assetGalleryEl;
+export let assetListEl;
+export let assetCountEl;
 
 let panelIsOpen = true;
 let panelToggleCallback = null;
@@ -141,6 +153,7 @@ export const bindElements = () => {
   logPanelEl = document.getElementById("log-panel");
   logToggleBtn = document.getElementById("log-toggle");
   recenterBtn = document.getElementById("recenter-btn");
+  autoAnchorBtn = document.getElementById("auto-anchor-btn");
   cameraRangeSliderEl = document.getElementById("camera-range-slider");
   cameraRangeLabelEl = document.getElementById("camera-range-label");
   fovSliderEl = document.getElementById("fov-slider");
@@ -148,6 +161,9 @@ export const bindElements = () => {
   bgBlurControlsEl = document.getElementById("bg-blur-controls");
   bgBlurSlider = document.getElementById("bg-blur-slider");
   bgBlurValue = document.getElementById("bg-blur-value");
+  assetGalleryEl = document.getElementById("asset-gallery");
+  assetListEl = document.getElementById("asset-list");
+  assetCountEl = document.getElementById("asset-count");
 };
 
 // Logging
@@ -247,4 +263,92 @@ export const updateInfo = ({ file, mesh, loadMs }) => {
 
 export const updateBounds = (center, size) => {
   if (boundsEl) boundsEl.textContent = `${formatVec3(center)} | size ${formatVec3(size)}`;
+};
+
+// Asset gallery management
+let onAssetClickCallback = null;
+
+export const setOnAssetClick = (callback) => {
+  onAssetClickCallback = callback;
+};
+
+export const showAssetGallery = (show) => {
+  if (assetGalleryEl) {
+    assetGalleryEl.classList.toggle("visible", show);
+  }
+};
+
+export const updateAssetCount = (current, total) => {
+  if (assetCountEl) {
+    assetCountEl.textContent = total > 1 ? `${current + 1} / ${total}` : "";
+  }
+};
+
+export const renderAssetList = (assets, currentIndex, onAssetClick) => {
+  if (!assetListEl) return;
+  
+  onAssetClickCallback = onAssetClick;
+  
+  assetListEl.innerHTML = assets.map((asset, index) => `
+    <button 
+      class="asset-item ${index === currentIndex ? "active" : ""}" 
+      data-index="${index}"
+      title="${asset.name}"
+    >
+      <div class="asset-preview ${asset.preview ? "" : "loading"}">
+        ${asset.preview ? `<img src="${asset.preview}" alt="${asset.name}" />` : '<div class="preview-spinner"></div>'}
+      </div>
+      <span class="asset-name">${truncateFileName(asset.name)}</span>
+    </button>
+  `).join("");
+  
+  // Add click handlers
+  assetListEl.querySelectorAll(".asset-item").forEach(item => {
+    item.addEventListener("click", () => {
+      const index = parseInt(item.dataset.index);
+      if (onAssetClickCallback) {
+        onAssetClickCallback(index);
+      }
+    });
+  });
+};
+
+export const updateAssetActiveState = (index) => {
+  if (!assetListEl) return;
+  
+  assetListEl.querySelectorAll(".asset-item").forEach((item, i) => {
+    item.classList.toggle("active", i === index);
+  });
+  
+  // Scroll active item into view
+  const activeItem = assetListEl.querySelector(".asset-item.active");
+  if (activeItem) {
+    activeItem.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+};
+
+export const updateAssetPreview = (index, previewUrl) => {
+  if (!assetListEl) return;
+  
+  const item = assetListEl.querySelector(`[data-index="${index}"]`);
+  if (item) {
+    const previewEl = item.querySelector(".asset-preview");
+    if (previewEl) {
+      previewEl.classList.remove("loading");
+      if (previewUrl && previewUrl.startsWith("data:")) {
+        previewEl.innerHTML = `<img src="${previewUrl}" alt="Preview" />`;
+      } else {
+        // Preview failed - show placeholder
+        previewEl.innerHTML = '<div class="preview-failed">•••</div>';
+      }
+    }
+  }
+};
+
+const truncateFileName = (name, maxLength = 18) => {
+  if (name.length <= maxLength) return name;
+  const ext = name.includes(".") ? name.split(".").pop() : "";
+  const base = name.slice(0, name.length - ext.length - 1);
+  const truncatedBase = base.slice(0, maxLength - ext.length - 4) + "...";
+  return ext ? `${truncatedBase}.${ext}` : truncatedBase;
 };

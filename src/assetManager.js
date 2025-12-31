@@ -1,0 +1,252 @@
+/**
+ * Asset Manager module - handles multi-asset list, navigation, and preview generation
+ */
+
+import { getSupportedExtensions } from "./formats/index.js";
+
+// Supported image extensions for preview matching
+const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"];
+
+// Asset list state
+let assetList = [];
+let currentAssetIndex = -1;
+let onAssetChangeCallback = null;
+let onPreviewGeneratedCallback = null;
+
+// Store reference to capture function (injected from fileLoader)
+let capturePreviewFn = null;
+
+/**
+ * Set the function used to capture previews from the main renderer
+ */
+export const setCapturePreviewFn = (fn) => {
+  capturePreviewFn = fn;
+};
+
+/**
+ * Capture preview for the current asset using the main renderer
+ * This is called after an asset is loaded and rendered
+ */
+export const captureCurrentAssetPreview = () => {
+  if (currentAssetIndex < 0 || !capturePreviewFn) return;
+  
+  const asset = assetList[currentAssetIndex];
+  if (!asset || asset.preview) return; // Already has preview
+  
+  const dataUrl = capturePreviewFn();
+  if (dataUrl) {
+    asset.preview = dataUrl;
+    if (onPreviewGeneratedCallback) {
+      onPreviewGeneratedCallback(asset, currentAssetIndex);
+    }
+  }
+};
+
+/**
+ * Get file extension in lowercase
+ */
+const getExtension = (filename) => {
+  const parts = filename.split(".");
+  return parts.length > 1 ? `.${parts.pop().toLowerCase()}` : "";
+};
+
+/**
+ * Get base filename without extension
+ */
+const getBaseName = (filename) => {
+  const lastDot = filename.lastIndexOf(".");
+  return lastDot > 0 ? filename.slice(0, lastDot) : filename;
+};
+
+/**
+ * Load an image file as a data URL
+ */
+const loadImageAsDataUrl = (file) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+};
+
+/**
+ * Filter and sort files by supported extensions
+ */
+const filterSupportedFiles = (files) => {
+  const extensions = getSupportedExtensions();
+  return Array.from(files)
+    .filter(file => {
+      const ext = getExtension(file.name);
+      return extensions.includes(ext);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+};
+
+/**
+ * Find image files that could be used as previews
+ */
+const findImageFiles = (files) => {
+  return Array.from(files).filter(file => {
+    const ext = getExtension(file.name);
+    return IMAGE_EXTENSIONS.includes(ext);
+  });
+};
+
+/**
+ * Match assets with corresponding image files by base filename
+ */
+const matchPreviewImages = async (assets, imageFiles) => {
+  // Create a map of base names to image files
+  const imageMap = new Map();
+  for (const img of imageFiles) {
+    const baseName = getBaseName(img.name).toLowerCase();
+    // Store the first match (in case of multiple images with same base name)
+    if (!imageMap.has(baseName)) {
+      imageMap.set(baseName, img);
+    }
+  }
+  
+  // Match assets with images
+  for (const asset of assets) {
+    const assetBaseName = getBaseName(asset.name).toLowerCase();
+    const matchingImage = imageMap.get(assetBaseName);
+    
+    if (matchingImage) {
+      const dataUrl = await loadImageAsDataUrl(matchingImage);
+      if (dataUrl) {
+        asset.preview = dataUrl;
+        asset.previewSource = "image"; // Mark as image-sourced preview
+      }
+    }
+  }
+  
+  return assets;
+};
+
+/**
+ * Set the asset list from files (single file, multiple files, or folder contents)
+ * Also looks for matching image files to use as previews
+ */
+export const setAssetList = async (files) => {
+  const supportedFiles = filterSupportedFiles(files);
+  
+  if (supportedFiles.length === 0) {
+    return { count: 0, assets: [] };
+  }
+  
+  // Find image files for potential preview matching
+  const imageFiles = findImageFiles(files);
+  
+  // Create asset entries
+  assetList = supportedFiles.map((file, index) => ({
+    id: `asset-${Date.now()}-${index}`,
+    file,
+    name: file.name,
+    preview: null,
+    previewSource: null,
+    loaded: false,
+  }));
+  
+  // Try to match assets with image previews
+  if (imageFiles.length > 0) {
+    await matchPreviewImages(assetList, imageFiles);
+    const matchedCount = assetList.filter(a => a.preview).length;
+    if (matchedCount > 0) {
+      console.log(`[AssetManager] Matched ${matchedCount}/${assetList.length} assets with image previews`);
+    }
+  }
+  
+  // Reset index
+  currentAssetIndex = -1;
+  
+  return { count: assetList.length, assets: assetList };
+};
+
+/**
+ * Get the current asset list
+ */
+export const getAssetList = () => assetList;
+
+/**
+ * Get the current asset index
+ */
+export const getCurrentAssetIndex = () => currentAssetIndex;
+
+/**
+ * Get an asset by index
+ */
+export const getAssetByIndex = (index) => {
+  if (index < 0 || index >= assetList.length) return null;
+  return assetList[index];
+};
+
+/**
+ * Set the current asset by index and trigger callback
+ */
+export const setCurrentAssetIndex = (index) => {
+  if (index < 0 || index >= assetList.length) return false;
+  currentAssetIndex = index;
+  assetList[index].loaded = true;
+  return true;
+};
+
+/**
+ * Navigate to next asset
+ */
+export const nextAsset = () => {
+  if (assetList.length === 0) return null;
+  const nextIndex = (currentAssetIndex + 1) % assetList.length;
+  setCurrentAssetIndex(nextIndex);
+  return assetList[nextIndex];
+};
+
+/**
+ * Navigate to previous asset
+ */
+export const prevAsset = () => {
+  if (assetList.length === 0) return null;
+  const prevIndex = currentAssetIndex <= 0 ? assetList.length - 1 : currentAssetIndex - 1;
+  setCurrentAssetIndex(prevIndex);
+  return assetList[prevIndex];
+};
+
+/**
+ * Get current asset
+ */
+export const getCurrentAsset = () => {
+  if (currentAssetIndex < 0 || currentAssetIndex >= assetList.length) return null;
+  return assetList[currentAssetIndex];
+};
+
+/**
+ * Check if we have multiple assets
+ */
+export const hasMultipleAssets = () => assetList.length > 1;
+
+/**
+ * Get total asset count
+ */
+export const getAssetCount = () => assetList.length;
+
+/**
+ * Set callback for when asset changes
+ */
+export const onAssetChange = (callback) => {
+  onAssetChangeCallback = callback;
+};
+
+/**
+ * Set callback for when a preview is generated
+ */
+export const onPreviewGenerated = (callback) => {
+  onPreviewGeneratedCallback = callback;
+};
+
+/**
+ * Clear all assets
+ */
+export const clearAssets = () => {
+  assetList = [];
+  currentAssetIndex = -1;
+};

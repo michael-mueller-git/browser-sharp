@@ -25,6 +25,7 @@ import {
   setStatus,
   appendLog,
   formatVec3,
+  autoAnchorBtn,
 } from "./ui.js";
 
 // Viewer module
@@ -63,6 +64,8 @@ import {
 import {
   initDragDrop,
   initFilePicker,
+  loadNextAsset,
+  loadPrevAsset,
   updateViewerAspectRatio,
   resize,
 } from "./fileLoader.js";
@@ -97,6 +100,56 @@ if (recenterBtn) {
   });
 }
 
+const applyAnchorTarget = (point, distance = null, label = "Anchor set") => {
+  controls.target.copy(point);
+  controls.update();
+  updateDollyZoomBaselineFromCamera();
+  requestRender();
+  const distanceText = distance != null ? ` (distance: ${distance.toFixed(2)})` : "";
+  appendLog(`${label}: ${formatVec3(point)}${distanceText}`);
+};
+
+const getSplatHitAt = (mouseVec2) => {
+  raycaster.setFromCamera(mouseVec2, camera);
+  const intersects = [];
+  raycaster.intersectObjects(scene.children, true, intersects);
+  return intersects.find((i) => i.object instanceof SplatMesh) ?? null;
+};
+
+const trySetAnchorFromScreenPoint = (mouseVec2, label = "Anchor set") => {
+  const splatHit = getSplatHitAt(mouseVec2);
+  if (!splatHit) return false;
+  applyAnchorTarget(splatHit.point, splatHit.distance, label);
+  return true;
+};
+
+const focusViewCenter = () => {
+  if (!currentMesh) {
+    appendLog("Auto target unavailable: no mesh loaded");
+    return;
+  }
+
+  const centerRay = new THREE.Vector2(0, 0);
+  if (trySetAnchorFromScreenPoint(centerRay, "Auto target")) {
+    return;
+  }
+
+  const box = currentMesh.getBoundingBox?.();
+  if (box) {
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    applyAnchorTarget(center, null, "Auto target (bounds)");
+    return;
+  }
+
+  const fallbackPoint = currentMesh.position?.clone?.() ?? new THREE.Vector3(0, 0, 0);
+  applyAnchorTarget(fallbackPoint, null, "Auto target (origin)");
+};
+
+if (autoAnchorBtn) {
+  autoAnchorBtn.addEventListener("click", focusViewCenter);
+}
+
 // Global keyboard shortcut: Spacebar to recenter view
 document.addEventListener("keydown", (event) => {
   const target = event.target;
@@ -120,6 +173,20 @@ document.addEventListener("keydown", (event) => {
   if (event.code === "Space" || event.key === " " || event.key === "Spacebar") {
     event.preventDefault();
     restoreHomeView(fovSliderEl, fovValueEl, resize);
+    return;
+  }
+
+  // Arrow key navigation for multi-asset browsing
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+    event.preventDefault();
+    loadNextAsset();
+    return;
+  }
+
+  if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    event.preventDefault();
+    loadPrevAsset();
+    return;
   }
 });
 
@@ -133,17 +200,8 @@ renderer.domElement.addEventListener("dblclick", (event) => {
     -((event.clientY - rect.top) / rect.height) * 2 + 1
   );
 
-  raycaster.setFromCamera(mouse, camera);
-  const intersects = [];
-  raycaster.intersectObjects(scene.children, true, intersects);
-
-  const splatHit = intersects.find((i) => i.object instanceof SplatMesh);
-  if (splatHit) {
-    controls.target.copy(splatHit.point);
-    controls.update();
-    updateDollyZoomBaselineFromCamera();
-    requestRender();
-    appendLog(`Anchor set: ${formatVec3(splatHit.point)} (distance: ${splatHit.distance.toFixed(2)})`);
+  if (!trySetAnchorFromScreenPoint(mouse)) {
+    appendLog("No splat found under cursor for anchor");
   }
 });
 
