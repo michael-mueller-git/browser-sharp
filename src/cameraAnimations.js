@@ -1,9 +1,21 @@
 import { camera, controls, requestRender, THREE } from "./viewer.js";
+import { useStore } from "./store.js";
+
+// Get store state
+const getStoreState = () => useStore.getState();
 
 let animationState = null;
 let resetAnimationState = null;
 let anchorAnimationState = null;
-let animationEnabled = true;
+
+// Get animation settings from store
+const getAnimationEnabled = () => getStoreState().animationEnabled;
+
+export const isLoadAnimationEnabled = () => getAnimationEnabled();
+
+export const setLoadAnimationEnabled = (enabled) => {
+  getStoreState().setAnimationEnabled(enabled);
+};
 
 const sweepPresets = {
   left: { axis: "up", startDeg: 4, endDeg: 0 },
@@ -22,9 +34,6 @@ const intensityPresets = {
 
 const validDirections = ["left", "right", "up", "down", "none"];
 
-let currentIntensityKey = "medium";
-let currentDirectionChoice = "left";
-
 const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 
 export const cancelLoadZoomAnimation = () => {
@@ -40,23 +49,25 @@ export const cancelLoadZoomAnimation = () => {
   animationState = null;
 };
 
-export const getLoadAnimationIntensityKey = () => currentIntensityKey;
+export const getLoadAnimationIntensityKey = () => getStoreState().animationIntensity;
 
 export const setLoadAnimationIntensity = (key) => {
   if (intensityPresets[key]) {
-    currentIntensityKey = key;
+    getStoreState().setAnimationIntensity(key);
+    return key;
   }
-  return currentIntensityKey;
+  return getStoreState().animationIntensity;
 };
 
-export const getLoadAnimationDirection = () => currentDirectionChoice;
+export const getLoadAnimationDirection = () => getStoreState().animationDirection;
 
 export const setLoadAnimationDirection = (direction) => {
   const normalized = direction?.toLowerCase?.();
   if (validDirections.includes(normalized)) {
-    currentDirectionChoice = normalized;
+    getStoreState().setAnimationDirection(normalized);
+    return normalized;
   }
-  return currentDirectionChoice;
+  return getStoreState().animationDirection;
 };
 
 export const startLoadZoomAnimation = (options = {}) => {
@@ -67,12 +78,16 @@ export const startLoadZoomAnimation = (options = {}) => {
   const requestedDirection = normalizedOptions.direction?.toLowerCase?.() ?? null;
   const forcePlayback = Boolean(normalizedOptions.force);
 
+  const animationEnabled = getAnimationEnabled();
   if (!camera || !controls || (!animationEnabled && !forcePlayback)) return;
 
   const baseOffset = new THREE.Vector3().subVectors(camera.position, controls.target);
   const distance = baseOffset.length();
   if (!Number.isFinite(distance) || distance <= 0.01) return;
 
+  const currentIntensityKey = getLoadAnimationIntensityKey();
+  const currentDirectionChoice = getLoadAnimationDirection();
+  
   const intensity = intensityPresets[currentIntensityKey] ?? intensityPresets.medium;
   const sweepMultiplier = intensity.sweepMultiplier ?? 1;
 
@@ -176,15 +191,6 @@ export const startLoadZoomAnimation = (options = {}) => {
     wasEnabled,
   };
 };
-
-export const setLoadAnimationEnabled = (enabled) => {
-  animationEnabled = Boolean(enabled);
-  if (!animationEnabled) {
-    cancelLoadZoomAnimation();
-  }
-};
-
-export const isLoadAnimationEnabled = () => animationEnabled;
 
 // Smooth reset animation
 const easeInOutCubic = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;

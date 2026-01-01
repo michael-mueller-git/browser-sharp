@@ -3,20 +3,7 @@
  */
 
 import { getFormatHandler, getSupportedExtensions } from "./formats/index.js";
-import {
-  viewerEl,
-  pickBtn,
-  fileInput,
-  appendLog,
-  setStatus,
-  updateInfo,
-  supportedExtensionsText,
-  showAssetGallery,
-  renderAssetList,
-  updateAssetCount,
-  updateAssetActiveState,
-  updateAssetPreview,
-} from "./ui.js";
+import { useStore } from "./store.js";
 import {
   scene,
   renderer,
@@ -46,10 +33,10 @@ import {
 } from "./cameraUtils.js";
 import { startLoadZoomAnimation } from "./cameraAnimations.js";
 import {
-  setAssetList,
+  setAssetList as setAssetListManager,
   getAssetList,
   getCurrentAssetIndex,
-  setCurrentAssetIndex,
+  setCurrentAssetIndex as setCurrentAssetIndexManager,
   getAssetByIndex,
   onPreviewGenerated,
   hasMultipleAssets,
@@ -60,12 +47,23 @@ import {
   captureCurrentAssetPreview,
 } from "./assetManager.js";
 
-// Resize callback (set by main.js)
-let resizeCallback = null;
-export const setResizeCallback = (fn) => { resizeCallback = fn; };
+// Get store functions (these will be used from components)
+const getStoreState = () => useStore.getState();
+
+// Helper to get DOM elements
+const getViewerEl = () => document.getElementById('viewer');
+const getPickBtn = () => document.getElementById('pick-btn');
+const getFileInput = () => document.getElementById('file-input');
+
+// Helper to get supported extensions text
+const supportedExtensions = getSupportedExtensions();
+const supportedExtensionsText = supportedExtensions.join(", ");
 
 // Update viewer aspect ratio based on image metadata
 export const updateViewerAspectRatio = () => {
+  const viewerEl = getViewerEl();
+  if (!viewerEl) return;
+  
   const pageEl = document.querySelector(".page");
   const sidePanelEl = document.getElementById("side-panel");
   const padding = 36; // 18px page padding on each side
@@ -95,6 +93,9 @@ export const updateViewerAspectRatio = () => {
 };
 
 export const resize = () => {
+  const viewerEl = getViewerEl();
+  if (!viewerEl) return;
+  
   updateViewerAspectRatio();
   const { clientWidth, clientHeight } = viewerEl;
   renderer.setSize(clientWidth, clientHeight, false);
@@ -151,21 +152,39 @@ const captureAndApplyBackground = () => {
   renderer.setClearColor(0x000000, 0);
   
   requestRender();
-  appendLog("Background captured from model render");
+  getStoreState().addLog("Background captured from model render");
+};
+
+// Format bytes helper
+const formatBytes = (bytes) => {
+  if (!bytes && bytes !== 0) return "-";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let value = bytes;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[i]}`;
 };
 
 export const loadSplatFile = async (file) => {
-  if (!file) return;
+  const viewerEl = getViewerEl();
+  if (!file || !viewerEl) return;
+  
+  const store = getStoreState();
+  
   const formatHandler = getFormatHandler(file);
   if (!formatHandler) {
-    setStatus(`Only ${supportedExtensionsText} 3DGS files are supported`);
+    store.setStatus(`Only ${supportedExtensionsText} 3DGS files are supported`);
     return;
   }
 
   try {
     viewerEl.classList.add("loading");
+    store.setIsLoading(true);
     
-    setStatus("Reading local file...");
+    store.setStatus("Reading local file...");
     const start = performance.now();
     const bytes = new Uint8Array(await file.arrayBuffer());
 
@@ -176,7 +195,7 @@ export const loadSplatFile = async (file) => {
         const { intrinsics } = cameraMetadata;
         setOriginalImageAspect(intrinsics.imageWidth / intrinsics.imageHeight);
         updateViewerAspectRatio();
-        appendLog(
+        store.addLog(
           `${formatHandler.label} camera: fx=${intrinsics.fx.toFixed(1)}, fy=${intrinsics.fy.toFixed(1)}, ` +
             `cx=${intrinsics.cx.toFixed(1)}, cy=${intrinsics.cy.toFixed(1)}, ` +
             `img=${intrinsics.imageWidth}x${intrinsics.imageHeight}`,
@@ -188,10 +207,10 @@ export const loadSplatFile = async (file) => {
     } catch (error) {
       setOriginalImageAspect(null);
       updateViewerAspectRatio();
-      appendLog(`Failed to parse camera metadata, falling back to default view: ${error?.message ?? error}`);
+      store.addLog(`Failed to parse camera metadata, falling back to default view: ${error?.message ?? error}`);
     }
 
-    setStatus(`Parsing ${formatHandler.label} and building splats...`);
+    store.setStatus(`Parsing ${formatHandler.label} and building splats...`);
     const mesh = await formatHandler.loadData({ file, bytes });
 
     // Configure pipeline based on color space
@@ -246,25 +265,34 @@ export const loadSplatFile = async (file) => {
     warmup();
 
     const loadMs = performance.now() - start;
-    updateInfo({ file, mesh, loadMs });
+    
+    // Update file info in store
+    store.setFileInfo({
+      name: file.name,
+      size: formatBytes(file.size),
+      splatCount: mesh?.packedSplats?.numSplats ?? "-",
+      loadTime: `${loadMs.toFixed(1)} ms`,
+    });
     
     setTimeout(() => {
       viewerEl.classList.remove("loading");
+      store.setIsLoading(false);
     }, 100);
     
-    setStatus(
+    store.setStatus(
       cameraMetadata
         ? "Loaded "
         : "Loaded (no camera data)",
     );
-    appendLog(
+    store.addLog(
       `Debug: splats=${mesh.packedSplats.numSplats}`,
     );
   } catch (error) {
     console.error(error);
     viewerEl.classList.remove("loading");
+    store.setIsLoading(false);
     clearMetadataCamera(resize);
-    setStatus("Load failed, please check the file or console log");
+    store.setStatus("Load failed, please check the file or console log");
   }
 };
 
@@ -275,6 +303,9 @@ const preventDefaults = (event) => {
 };
 
 export const initDragDrop = () => {
+  const viewerEl = getViewerEl();
+  if (!viewerEl) return;
+  
   ["dragenter", "dragover"].forEach((eventName) => {
     viewerEl.addEventListener(eventName, (event) => {
       preventDefaults(event);
@@ -373,51 +404,50 @@ const processEntries = async (entries) => {
 
 // Handle multiple files (from drop or picker)
 export const handleMultipleFiles = async (files) => {
-  const result = await setAssetList(files);
+  if (!files || files.length === 0) return;
+  const store = getStoreState();
+  const result = await setAssetListManager(files);
   
   if (result.count === 0) {
-    setStatus(`No supported files found. Supported: ${supportedExtensionsText}`);
+    store.setStatus(`No supported files found. Supported: ${supportedExtensionsText}`);
     return;
   }
   
+  // Update store with assets
+  store.setAssets(result.assets);
+  
   if (result.count === 1) {
     // Single file - load directly
-    showAssetGallery(false);
-    setCurrentAssetIndex(0);
+    setCurrentAssetIndexManager(0);
+    store.setCurrentAssetIndex(0);
     await loadSplatFile(result.assets[0].file);
   } else {
     // Multiple files - show gallery and start loading
-    appendLog(`Found ${result.count} assets`);
-    showAssetGallery(true);
+    store.addLog(`Found ${result.count} assets`);
     
     // Set up preview generation callback
     onPreviewGenerated((asset, index) => {
-      updateAssetPreview(index, asset.preview);
+      store.updateAssetPreview(index, asset.preview);
     });
     
-    // Render initial list (without previews)
-    renderAssetList(result.assets, -1, handleAssetClick);
-    updateAssetCount(-1, result.count);
-    
     // Load first asset (preview will be captured automatically after warmup)
-    setCurrentAssetIndex(0);
-    updateAssetActiveState(0);
-    updateAssetCount(0, result.count);
+    setCurrentAssetIndexManager(0);
+    store.setCurrentAssetIndex(0);
     await loadSplatFile(result.assets[0].file);
   }
 };
 
-// Handle asset click from gallery
-const handleAssetClick = async (index) => {
+// Load asset by index (called from AssetGallery component)
+export const loadAssetByIndex = async (index) => {
   const currentIndex = getCurrentAssetIndex();
   if (index === currentIndex) return;
   
   const asset = getAssetByIndex(index);
   if (!asset) return;
   
-  setCurrentAssetIndex(index);
-  updateAssetActiveState(index);
-  updateAssetCount(index, getAssetCount());
+  const store = getStoreState();
+  setCurrentAssetIndexManager(index);
+  store.setCurrentAssetIndex(index);
   await loadSplatFile(asset.file);
 };
 
@@ -428,8 +458,8 @@ export const loadNextAsset = async () => {
   const asset = nextAsset();
   if (asset) {
     const index = getCurrentAssetIndex();
-    updateAssetActiveState(index);
-    updateAssetCount(index, getAssetCount());
+    const store = getStoreState();
+    store.setCurrentAssetIndex(index);
     await loadSplatFile(asset.file);
   }
 };
@@ -441,13 +471,17 @@ export const loadPrevAsset = async () => {
   const asset = prevAsset();
   if (asset) {
     const index = getCurrentAssetIndex();
-    updateAssetActiveState(index);
-    updateAssetCount(index, getAssetCount());
+    const store = getStoreState();
+    store.setCurrentAssetIndex(index);
     await loadSplatFile(asset.file);
   }
 };
 
 export const initFilePicker = () => {
+  const pickBtn = getPickBtn();
+  const fileInput = getFileInput();
+  if (!pickBtn || !fileInput) return;
+  
   // Enable multiple file selection
   fileInput.setAttribute("multiple", "");
   // Add webkitdirectory for folder selection (optional secondary button could enable this)

@@ -15,8 +15,15 @@ import {
   setDollyZoomEnabled,
   THREE,
 } from "./viewer.js";
-import { appendLog, updateBounds, formatVec3 } from "./ui.js";
+import { useStore } from "./store.js";
 import { startSmoothResetAnimation, cancelResetAnimation } from "./cameraAnimations.js";
+import { resize } from "./fileLoader.js";
+
+// Helper to access store
+const getStoreState = () => useStore.getState();
+
+// Helper to format vec3
+const formatVec3 = (vec) => `${vec.x.toFixed(2)}, ${vec.y.toFixed(2)}, ${vec.z.toFixed(2)}`;
 
 // Home view state
 let homeView = null;
@@ -38,9 +45,10 @@ export const saveHomeView = () => {
   };
 };
 
-export const restoreHomeView = (fovSliderEl, fovValueEl, resize) => {
+export const restoreHomeView = () => {
   if (!homeView) return;
 
+  const store = getStoreState();
   const targetState = {
     position: homeView.cameraPosition.clone(),
     quaternion: homeView.cameraQuaternion.clone(),
@@ -51,21 +59,18 @@ export const restoreHomeView = (fovSliderEl, fovValueEl, resize) => {
     target: homeView.controlsTarget.clone(),
   };
 
-  // Animate FOV slider during transition
-  const animateFovSlider = () => {
-    if (fovSliderEl) {
-      fovSliderEl.value = String(camera.fov.toFixed(0));
-      if (fovValueEl) fovValueEl.textContent = `${camera.fov.toFixed(0)}°`;
-    }
+  // Animate FOV update in store during transition
+  const animateFov = () => {
+    store.setFov(Math.round(camera.fov));
   };
 
-  // Update slider during animation
-  const sliderInterval = setInterval(animateFovSlider, 16);
+  // Update store during animation
+  const fovInterval = setInterval(animateFov, 16);
 
   startSmoothResetAnimation(targetState, {
     duration: 600,
     onComplete: () => {
-      clearInterval(sliderInterval);
+      clearInterval(fovInterval);
 
       // Apply final control settings
       controls.dampingFactor = homeView.controlsDampingFactor;
@@ -75,11 +80,8 @@ export const restoreHomeView = (fovSliderEl, fovValueEl, resize) => {
 
       setActiveCamera(homeView.activeCamera ? { ...homeView.activeCamera } : null);
 
-      // Sync UI FOV slider with restored camera fov
-      if (fovSliderEl) {
-        fovSliderEl.value = String(homeView.cameraFov);
-        if (fovValueEl) fovValueEl.textContent = `${homeView.cameraFov.toFixed(0)}°`;
-      }
+      // Sync store with restored camera fov
+      store.setFov(Math.round(homeView.cameraFov));
 
       // Reset dolly zoom to its default enabled state and baseline
       setDollyZoomEnabled(true);
@@ -87,6 +89,8 @@ export const restoreHomeView = (fovSliderEl, fovValueEl, resize) => {
 
       controls.update();
       requestRender();
+      
+      // Trigger resize
       if (resize) resize();
     },
   });
@@ -113,7 +117,11 @@ export const fitViewToMesh = (mesh) => {
   updateDollyZoomBaselineFromCamera();
   requestRender();
 
-  updateBounds(center, size);
+  // Update bounds in store
+  const store = getStoreState();
+  store.setFileInfo({
+    bounds: `${formatVec3(center)} | size ${formatVec3(size)}`,
+  });
 };
 
 // CV to GL axis flip matrix
@@ -232,6 +240,7 @@ export const applyCameraProjection = (cameraMetadata, viewportWidth, viewportHei
 };
 
 export const applyMetadataCamera = (mesh, cameraMetadata, resize) => {
+  const store = getStoreState();
   const cvToThree = makeAxisFlipCvToGl();
   if (!mesh.userData.__cvToThreeApplied) {
     mesh.applyMatrix4(cvToThree);
@@ -272,7 +281,9 @@ export const applyMetadataCamera = (mesh, cameraMetadata, resize) => {
     const far = Math.max(near + 1.0, dist + radius * 6.0);
     setActiveCamera({ ...cameraMetadata, near, far });
 
-    updateBounds(center, size);
+    store.setFileInfo({
+      bounds: `${formatVec3(center)} | size ${formatVec3(size)}`,
+    });
   } else {
     setActiveCamera({ ...cameraMetadata, near: 0.01, far: 1000 });
   }
@@ -281,7 +292,7 @@ export const applyMetadataCamera = (mesh, cameraMetadata, resize) => {
   const lookAtCv = new THREE.Vector3(0, 0, depthFocusCv);
   const lookAtThree = lookAtCv.applyMatrix4(mesh.matrixWorld);
   controls.target.copy(lookAtThree);
-  appendLog(`ml-sharp lookAt: depth_focus=${depthFocusCv.toFixed(3)} (q=0.1, min=2.0)`);
+  store.addLog(`ml-sharp lookAt: depth_focus=${depthFocusCv.toFixed(3)} (q=0.1, min=2.0)`);
 
   controls.enabled = true;
   controls.update();
@@ -308,6 +319,8 @@ export const clearMetadataCamera = (resize) => {
 
 // Orbit range control
 export const applyCameraRangeDegrees = (degrees) => {
+  if (!controls) return;
+  
   // Convert degrees (0-180) to orbit limits
   // 0° = locked view, 180° = full hemisphere orbit
   const t = Math.max(0, Math.min(180, degrees)) / 180;
