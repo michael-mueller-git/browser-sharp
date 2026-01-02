@@ -29,6 +29,8 @@ function AssetGallery() {
   // Store state
   const assets = useStore((state) => state.assets);
   const currentAssetIndex = useStore((state) => state.currentAssetIndex);
+  const galleryExpanded = useStore((state) => state.galleryExpanded);
+  const toggleGalleryExpanded = useStore((state) => state.toggleGalleryExpanded);
 
   // Only show gallery with multiple assets
   const showGallery = assets.length > 1;
@@ -47,34 +49,45 @@ function AssetGallery() {
   }
 
   return (
-    <div class={`asset-gallery ${showGallery ? 'visible' : ''}`}>
-      {/* Header with asset counter */}
-      <div class="asset-gallery-header">
+    <div class="settings-group">
+      {/* Collapsible header */}
+      <button
+        class="group-toggle"
+        aria-expanded={galleryExpanded}
+        onClick={toggleGalleryExpanded}
+      >
         <span class="settings-eyebrow">Assets</span>
         <span class="asset-count">
           {currentAssetIndex + 1} / {assets.length}
         </span>
-      </div>
+        <span class="chevron" />
+      </button>
       
-      {/* Scrollable asset list */}
-      <div class="asset-list">
-        {assets.map((asset, index) => (
-          <button
-            key={asset.id || index}
-            class={`asset-item ${index === currentAssetIndex ? 'active' : ''}`}
-            title={asset.name}
-            onClick={() => handleAssetClick(index)}
-          >
-            <div class={`asset-preview ${asset.preview ? '' : 'loading'}`}>
-              {asset.preview ? (
-                <img src={asset.preview} alt={asset.name} loading="lazy" />
-              ) : (
-                <div class="preview-spinner" />
-              )}
-            </div>
-            <span class="asset-name">{truncateFileName(asset.name)}</span>
-          </button>
-        ))}
+      {/* Gallery content */}
+      <div 
+        class="group-content asset-list-container" 
+        style={{ display: galleryExpanded ? 'flex' : 'none' }}
+      >
+        {/* Scrollable asset list */}
+        <div class="asset-list">
+          {assets.map((asset, index) => (
+            <button
+              key={asset.id || index}
+              class={`asset-item ${index === currentAssetIndex ? 'active' : ''}`}
+              title={asset.name}
+              onClick={() => handleAssetClick(index)}
+            >
+              <div class={`asset-preview ${asset.preview ? '' : 'loading'}`}>
+                {asset.preview ? (
+                  <img src={asset.preview} alt={asset.name} loading="lazy" />
+                ) : (
+                  <div class="preview-spinner" />
+                )}
+              </div>
+              <span class="asset-name">{truncateFileName(asset.name)}</span>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

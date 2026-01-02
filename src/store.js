@@ -56,6 +56,13 @@ export const useStore = create((set, get) => ({
   panelOpen: true,
   logExpanded: false,
   animSettingsExpanded: false,
+  cameraSettingsExpanded: true,
+  galleryExpanded: true,
+  
+  // Mobile state
+  isMobile: false,
+  isPortrait: false,
+  immersiveMode: false,
   
   // Debug
   debugLoadingMode: false,
@@ -138,6 +145,25 @@ export const useStore = create((set, get) => ({
   toggleAnimSettingsExpanded: () => set((state) => ({ 
     animSettingsExpanded: !state.animSettingsExpanded 
   })),
+  
+  /** Toggles camera settings expanded */
+  toggleCameraSettingsExpanded: () => set((state) => ({ 
+    cameraSettingsExpanded: !state.cameraSettingsExpanded 
+  })),
+  
+  /** Toggles gallery expanded */
+  toggleGalleryExpanded: () => set((state) => ({ 
+    galleryExpanded: !state.galleryExpanded 
+  })),
+  
+  /** Sets mobile state */
+  setMobileState: (isMobile, isPortrait) => set({ isMobile, isPortrait }),
+  
+  /** Sets immersive mode */
+  setImmersiveMode: (enabled) => set({ immersiveMode: enabled }),
+  
+  /** Toggles immersive mode */
+  toggleImmersiveMode: () => set((state) => ({ immersiveMode: !state.immersiveMode })),
   
   /** Toggles debug loading mode */
   toggleDebugLoadingMode: () => set((state) => ({ 

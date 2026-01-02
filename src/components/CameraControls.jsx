@@ -10,6 +10,7 @@ import { applyCameraRangeDegrees, restoreHomeView } from '../cameraUtils';
 import { currentMesh, raycaster, SplatMesh, scene } from '../viewer';
 import { updateDollyZoomBaselineFromCamera } from '../viewer';
 import { startAnchorTransition } from '../cameraAnimations';
+import { enableImmersiveMode, disableImmersiveMode, resetImmersiveBaseline } from '../immersiveMode';
 
 /** Default orbit range in degrees */
 const DEFAULT_CAMERA_RANGE_DEGREES = 8;
@@ -98,6 +99,11 @@ function CameraControls() {
   const cameraRange = useStore((state) => state.cameraRange);
   const setCameraRange = useStore((state) => state.setCameraRange);
   const addLog = useStore((state) => state.addLog);
+  const cameraSettingsExpanded = useStore((state) => state.cameraSettingsExpanded);
+  const toggleCameraSettingsExpanded = useStore((state) => state.toggleCameraSettingsExpanded);
+  const isMobile = useStore((state) => state.isMobile);
+  const immersiveMode = useStore((state) => state.immersiveMode);
+  const setImmersiveMode = useStore((state) => state.setImmersiveMode);
 
   // Ref for camera range slider to avoid DOM queries
   const rangeSliderRef = useRef(null);
@@ -303,61 +309,120 @@ function CameraControls() {
     applyCameraRangeDegrees(degrees);
   }, [setCameraRange]);
 
+  /**
+   * Handles toggling immersive mode.
+   * Enables device orientation camera control.
+   */
+  const handleImmersiveToggle = useCallback(async (e) => {
+    const enabled = e.target.checked;
+    if (enabled) {
+      const success = await enableImmersiveMode();
+      if (success) {
+        setImmersiveMode(true);
+        addLog('Immersive mode enabled - tilt device to orbit');
+      } else {
+        e.target.checked = false;
+        addLog('Could not enable immersive mode');
+      }
+    } else {
+      disableImmersiveMode();
+      setImmersiveMode(false);
+      addLog('Immersive mode disabled');
+    }
+  }, [setImmersiveMode, addLog]);
+
+  /**
+   * Resets immersive mode baseline on recenter.
+   */
+  const handleRecenterWithImmersive = useCallback(() => {
+    handleRecenter();
+    if (immersiveMode) {
+      resetImmersiveBaseline();
+    }
+  }, [immersiveMode]);
+
   return (
-    <div class="settings">
-      <div class="settings-header">
+    <div class="settings-group">
+      {/* Collapsible header */}
+      <button
+        class="group-toggle"
+        aria-expanded={cameraSettingsExpanded}
+        onClick={toggleCameraSettingsExpanded}
+      >
         <span class="settings-eyebrow">Camera Settings</span>
-      </div>
+        <span class="chevron" />
+      </button>
+      
+      {/* Settings content */}
+      <div 
+        class="group-content" 
+        style={{ display: cameraSettingsExpanded ? 'flex' : 'none' }}
+      >
+        {/* Immersive mode toggle - mobile only */}
+        {isMobile && (
+          <div class="control-row animate-toggle-row">
+            <span class="control-label">Immersive mode</span>
+            <label class="switch">
+              <input
+                type="checkbox"
+                checked={immersiveMode}
+                onChange={handleImmersiveToggle}
+              />
+              <span class="switch-track" aria-hidden="true" />
+            </label>
+          </div>
+        )}
 
-      {/* Orbit range control */}
-      <div class="control-row camera-range-controls">
-        <span class="control-label">Orbit range</span>
-        <div class="control-track">
-          <input
-            ref={rangeSliderRef}
-            type="range"
-            min="0"
-            max="180"
-            step="0.1"
-            value={degreesToSliderValue(cameraRange)}
-            onInput={handleCameraRangeChange}
-          />
-          <span class="control-value">
-            {formatDegrees(cameraRange)}°
-          </span>
+        {/* Orbit range control */}
+        <div class="control-row camera-range-controls">
+          <span class="control-label">Orbit range</span>
+          <div class="control-track">
+            <input
+              ref={rangeSliderRef}
+              type="range"
+              min="0"
+              max="180"
+              step="0.1"
+              value={degreesToSliderValue(cameraRange)}
+              onInput={handleCameraRangeChange}
+            />
+            <span class="control-value">
+              {formatDegrees(cameraRange)}°
+            </span>
+          </div>
         </div>
-      </div>
 
-      {/* FOV control */}
-      <div class="control-row">
-        <span class="control-label">FOV</span>
-        <div class="control-track">
-          <input
-            type="range"
-            min="20"
-            max="120"
-            step="1"
-            value={fov}
-            onInput={handleFovChange}
-          />
-          <span class="control-value">
-            {fov}°
-          </span>
+        {/* FOV control */}
+        <div class="control-row">
+          <span class="control-label">FOV</span>
+          <div class="control-track">
+            <input
+              type="range"
+              min="20"
+              max="120"
+              step="1"
+              value={fov}
+              onInput={handleFovChange}
+            />
+            <span class="control-value">
+              {fov}°
+            </span>
+          </div>
         </div>
-      </div>
 
-      {/* Action buttons */}
-      <div class="settings-footer">
-        <button class="secondary" onClick={handleRecenter}>
-          Recenter view
-        </button>
-        <button 
-          class={getFocusButtonClass()}
-          onClick={focusMode === FOCUS_MODE.SETTING ? handleCancelFocusMode : handleStartFocusMode}
-          disabled={focusMode === FOCUS_MODE.SET}
-        >
-          {getFocusButtonText()}
-        </button>
+        {/* Action buttons */}
+        <div class="settings-footer">
+          <button class="secondary" onClick={handleRecenterWithImmersive}>
+            Recenter view
+          </button>
+          <button 
+            class={getFocusButtonClass()}
+            onClick={focusMode === FOCUS_MODE.SETTING ? handleCancelFocusMode : handleStartFocusMode}
+            disabled={focusMode === FOCUS_MODE.SET}
+          >
+            {getFocusButtonText()}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -48,6 +48,7 @@ const formatPoint = (point) =>
 function Viewer({ viewerReady }) {
   // Store state
   const debugLoadingMode = useStore((state) => state.debugLoadingMode);
+  const isMobile = useStore((state) => state.isMobile);
   
   // Store actions
   const addLog = useStore((state) => state.addLog);
@@ -190,6 +191,17 @@ function Viewer({ viewerReady }) {
         <div class="eyebrow">Drag PLY/SOG files or folders here</div>
         <div class="fine-print">Drop multiple files to browse • Spark + THREE 3DGS</div>
       </div>
+      {/* Reset view button - mobile only */}
+      {isMobile && (
+        <button 
+          class="reset-view-btn" 
+          onClick={restoreHomeView}
+          aria-label="Reset camera view"
+          title="Reset view (R)"
+        >
+          ⟲
+        </button>
+      )}
     </div>
   );
 }
