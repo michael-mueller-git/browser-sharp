@@ -745,29 +745,64 @@ body {
   opacity: 0.9;
 }
 
-/* Focus depth button states */
-.focus-btn {
-  min-width: 120px;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+/* Focus Control */
+.focus-control {
+  position: relative;
+  width: 100%;
 }
 
-.focus-btn.focus-setting {
+.focus-main-btn {
+  width: 100%;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+/* States */
+.focus-main-btn.is-setting {
   background: rgba(110, 231, 255, 0.15);
   border-color: rgba(110, 231, 255, 0.5);
   color: #6ee7ff;
   box-shadow: 0 0 12px rgba(110, 231, 255, 0.2);
   animation: focus-pulse 1.5s ease-in-out infinite;
 }
-
-.focus-btn.focus-setting:hover {
+.focus-main-btn.is-setting:hover {
   background: rgba(110, 231, 255, 0.2);
   border-color: rgba(110, 231, 255, 0.6);
 }
 
-.focus-btn.focus-set {
+.focus-main-btn.is-set {
   background: rgba(100, 220, 100, 0.15);
   border-color: rgba(100, 220, 100, 0.5);
   color: #7de87d;
+}
+
+.focus-main-btn.is-custom {
+  background: rgba(255, 220, 100, 0.12);
+  border-color: rgba(255, 220, 100, 0.35);
+  color: #ffdf80;
+}
+.focus-main-btn.is-custom:hover {
+  background: rgba(255, 220, 100, 0.16);
+  border-color: rgba(255, 220, 100, 0.45);
+}
+
+.focus-clear-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+.focus-clear-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
 }
 
 @keyframes focus-pulse {

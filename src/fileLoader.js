@@ -25,7 +25,14 @@ import {
   bgImageContainer,
   setBgImageUrl,
   THREE,
+  dollyZoomBaseDistance,
+  dollyZoomBaseFov,
 } from "./viewer.js";
+import {
+  loadFileSettings,
+  saveAnimationSettings,
+  savePreviewImage,
+} from "./fileStorage.js";
 import {
   fitViewToMesh,
   applyMetadataCamera,
@@ -159,7 +166,6 @@ setCapturePreviewFn(capturePreviewThumbnail);
  */
 const applyPreviewAsBackground = (previewUrl) => {
   if (!previewUrl) return;
-  console.log(previewUrl)
   setBgImageUrl(previewUrl);
   const blur = 20;
   updateBackgroundImage(previewUrl, blur);
@@ -248,6 +254,44 @@ export const loadSplatFile = async (file) => {
     return;
   }
 
+  // Set file name early so components can save settings
+  store.setFileInfo({ name: file.name });
+
+  // Load stored settings for this file
+  let focusDistanceOverride = undefined;
+  const storedSettings = await loadFileSettings(file.name);
+  if (storedSettings) {
+    store.addLog(`Found stored settings for ${file.name}`);
+
+    // Apply stored preview if available (before loading mesh)
+    if (storedSettings.preview) {
+      applyPreviewAsBackground(storedSettings.preview);
+    }
+
+    // Apply stored animation settings
+    if (storedSettings.animation) {
+      const { enabled, intensity, direction } = storedSettings.animation;
+      store.setAnimationEnabled(enabled);
+      store.setAnimationIntensity(intensity);
+      store.setAnimationDirection(direction);
+      const { setLoadAnimationEnabled, setLoadAnimationIntensity, setLoadAnimationDirection } = await import('./cameraAnimations.js');
+      setLoadAnimationEnabled(enabled);
+      setLoadAnimationIntensity(intensity);
+      setLoadAnimationDirection(direction);
+    }
+
+    // Store focus distance override for later application (after camera is positioned)
+    if (storedSettings.focusDistance !== undefined) {
+      focusDistanceOverride = storedSettings.focusDistance;
+      store.setHasCustomFocus(true);
+      store.addLog(`Found focus distance override: ${focusDistanceOverride.toFixed(2)} units`);
+    } else {
+      store.setHasCustomFocus(false);
+    }
+  } else {
+    store.setHasCustomFocus(false);
+  }
+
   try {
     // Immediately clear old backgrounds to prevent aspect ratio mismatch artifacts
     updateBackgroundImage(null);
@@ -323,6 +367,23 @@ export const loadSplatFile = async (file) => {
     }
     spark.update({ scene });
 
+    // Ensure UI reflects the computed camera FOV after positioning
+    try {
+      store.setFov(camera.fov);
+    } catch (err) {
+      console.warn('Failed to set store FOV from camera:', err);
+    }
+
+    // Apply focus distance override if present (after camera is positioned)
+    if (focusDistanceOverride !== undefined && camera && controls) {
+      const cameraDirection = new THREE.Vector3();
+      camera.getWorldDirection(cameraDirection);
+      const newTarget = camera.position.clone().addScaledVector(cameraDirection, focusDistanceOverride);
+      controls.target.copy(newTarget);
+      controls.update();
+      store.addLog(`Applied focus distance override: ${focusDistanceOverride.toFixed(2)} units`);
+    }
+
     // Save home view BEFORE animation so we capture the correct position
     saveHomeView();
 
@@ -353,7 +414,27 @@ export const loadSplatFile = async (file) => {
         
         if (!previewCaptured && warmupFrames === PREVIEW_CAPTURE_FRAME) {
           previewCaptured = true;
-          captureCurrentAssetPreview();
+          
+          // Only generate preview if not already in IndexedDB
+          const shouldGeneratePreview = !storedSettings?.preview;
+          
+          if (shouldGeneratePreview) {
+            captureCurrentAssetPreview();
+
+            // Save compressed preview to IndexedDB
+            const previewUrl = capturePreviewThumbnail();
+            if (previewUrl) {
+              const sizeKB = (previewUrl.length * 0.75 / 1024).toFixed(1);
+              store.addLog(`Preview saved (${sizeKB} KB)`);
+              savePreviewImage(file.name, previewUrl).catch(err => {
+                console.warn('Failed to save preview:', err);
+              });
+            }
+          } else {
+            // Use stored preview for current asset
+            captureCurrentAssetPreview(); // Still call to update asset manager
+            store.addLog('Using stored preview from IndexedDB');
+          }
         }
       }
     };
@@ -543,6 +624,18 @@ export const handleMultipleFiles = async (files) => {
   } else {
     // Multiple files - show gallery and start loading
     store.addLog(`Found ${result.count} assets`);
+    
+    // Load stored previews from IndexedDB for all assets
+    const { loadFileSettings } = await import('./fileStorage.js');
+    for (let i = 0; i < result.assets.length; i++) {
+      const asset = result.assets[i];
+      const storedSettings = await loadFileSettings(asset.name);
+      if (storedSettings?.preview && !asset.preview) {
+        asset.preview = storedSettings.preview;
+        asset.previewSource = 'indexeddb';
+        store.updateAssetPreview(i, asset.preview);
+      }
+    }
     
     // Set up preview generation callback
     onPreviewGenerated((asset, index) => {

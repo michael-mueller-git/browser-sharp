@@ -7,6 +7,7 @@
 import { useCallback } from 'preact/hooks';
 import { useStore } from '../store';
 import { setLoadAnimationEnabled, setLoadAnimationIntensity, setLoadAnimationDirection } from '../cameraAnimations';
+import { saveAnimationSettings } from '../fileStorage';
 
 /** Animation style options with display labels */
 const INTENSITY_OPTIONS = [
@@ -30,12 +31,28 @@ function AnimationSettings() {
   const animationIntensity = useStore((state) => state.animationIntensity);
   const animationDirection = useStore((state) => state.animationDirection);
   const animSettingsExpanded = useStore((state) => state.animSettingsExpanded);
+  const currentFileName = useStore((state) => state.fileInfo?.name);
   
   // Store actions
   const setAnimationEnabledStore = useStore((state) => state.setAnimationEnabled);
   const setAnimationIntensityStore = useStore((state) => state.setAnimationIntensity);
   const setAnimationDirectionStore = useStore((state) => state.setAnimationDirection);
   const toggleAnimSettingsExpanded = useStore((state) => state.toggleAnimSettingsExpanded);
+
+  /**
+   * Persists current animation settings to IndexedDB.
+   */
+  const persistAnimationSettings = useCallback((enabled, intensity, direction) => {
+    if (currentFileName && currentFileName !== '-') {
+      saveAnimationSettings(currentFileName, {
+        enabled,
+        intensity,
+        direction,
+      }).catch(err => {
+        console.warn('Failed to save animation settings:', err);
+      });
+    }
+  }, [currentFileName]);
 
   /**
    * Toggles load animation on/off.
@@ -45,7 +62,8 @@ function AnimationSettings() {
     const enabled = e.target.checked;
     setAnimationEnabledStore(enabled);
     setLoadAnimationEnabled(enabled);
-  }, [setAnimationEnabledStore]);
+    persistAnimationSettings(enabled, animationIntensity, animationDirection);
+  }, [setAnimationEnabledStore, persistAnimationSettings, animationIntensity, animationDirection]);
 
   /**
    * Changes animation intensity/style.
@@ -55,7 +73,8 @@ function AnimationSettings() {
     const intensity = e.target.value;
     setAnimationIntensityStore(intensity);
     setLoadAnimationIntensity(intensity);
-  }, [setAnimationIntensityStore]);
+    persistAnimationSettings(animationEnabled, intensity, animationDirection);
+  }, [setAnimationIntensityStore, persistAnimationSettings, animationEnabled, animationDirection]);
 
   /**
    * Changes animation sweep direction.
@@ -65,7 +84,8 @@ function AnimationSettings() {
     const direction = e.target.value;
     setAnimationDirectionStore(direction);
     setLoadAnimationDirection(direction);
-  }, [setAnimationDirectionStore]);
+    persistAnimationSettings(animationEnabled, animationIntensity, direction);
+  }, [setAnimationDirectionStore, persistAnimationSettings, animationEnabled, animationIntensity]);
 
   return (
     <div class="settings-group">

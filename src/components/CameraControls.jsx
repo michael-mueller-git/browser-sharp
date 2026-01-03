@@ -11,6 +11,7 @@ import { currentMesh, raycaster, SplatMesh, scene } from '../viewer';
 import { updateDollyZoomBaselineFromCamera } from '../viewer';
 import { startAnchorTransition } from '../cameraAnimations';
 import { enableImmersiveMode, disableImmersiveMode, recenterInImmersiveMode, isImmersiveModeActive } from '../immersiveMode';
+import { saveFocusDistance, clearFocusDistance } from '../fileStorage';
 
 /** Default orbit range in degrees */
 const DEFAULT_CAMERA_RANGE_DEGREES = 8;
@@ -20,6 +21,7 @@ const FOCUS_MODE = {
   IDLE: 'idle',
   SETTING: 'setting',
   SET: 'set',
+  CUSTOM: 'custom',
 };
 
 /**
@@ -104,6 +106,9 @@ function CameraControls() {
   const isMobile = useStore((state) => state.isMobile);
   const immersiveMode = useStore((state) => state.immersiveMode);
   const setImmersiveMode = useStore((state) => state.setImmersiveMode);
+  const currentFileName = useStore((state) => state.fileInfo?.name);
+  const hasCustomFocus = useStore((state) => state.hasCustomFocus);
+  const setHasCustomFocus = useStore((state) => state.setHasCustomFocus);
 
   // Ref for camera range slider to avoid DOM queries
   const rangeSliderRef = useRef(null);
@@ -112,6 +117,15 @@ function CameraControls() {
   const [focusMode, setFocusMode] = useState(FOCUS_MODE.IDLE);
   const focusModeRef = useRef(focusMode);
   focusModeRef.current = focusMode;
+
+  // Sync focus mode with custom focus state from store
+  useEffect(() => {
+    if (hasCustomFocus && focusMode === FOCUS_MODE.IDLE) {
+      setFocusMode(FOCUS_MODE.CUSTOM);
+    } else if (!hasCustomFocus && focusMode === FOCUS_MODE.CUSTOM) {
+      setFocusMode(FOCUS_MODE.IDLE);
+    }
+  }, [hasCustomFocus, focusMode]);
 
   /**
    * Handles click during focus-setting mode.
@@ -160,13 +174,21 @@ function CameraControls() {
     });
 
     addLog(`Focus depth set: ${hitDistance.toFixed(2)} units`);
+
+    // Persist focus distance for this file
+    if (currentFileName && currentFileName !== '-') {
+      saveFocusDistance(currentFileName, hitDistance).catch(err => {
+        console.warn('Failed to save focus distance:', err);
+      });
+      setHasCustomFocus(true);
+    }
     
     // Transition to "set" state briefly
     setFocusMode(FOCUS_MODE.SET);
     setTimeout(() => {
-      setFocusMode(FOCUS_MODE.IDLE);
+      setFocusMode(hasCustomFocus ? FOCUS_MODE.CUSTOM : FOCUS_MODE.IDLE);
     }, 1500);
-  }, [addLog]);
+  }, [addLog, currentFileName, hasCustomFocus]);
 
   /**
    * Activates focus-setting mode.
@@ -186,10 +208,25 @@ function CameraControls() {
    */
   const handleCancelFocusMode = useCallback(() => {
     if (focusModeRef.current === FOCUS_MODE.SETTING) {
-      setFocusMode(FOCUS_MODE.IDLE);
+      setFocusMode(hasCustomFocus ? FOCUS_MODE.CUSTOM : FOCUS_MODE.IDLE);
       addLog('Focus mode cancelled');
     }
-  }, [addLog]);
+  }, [addLog, hasCustomFocus]);
+
+  /**
+   * Clears custom focus distance override.
+   * Removes stored focus distance and reloads the file to apply default focus.
+   */
+  const handleClearCustomFocus = useCallback(async () => {
+    if (currentFileName && currentFileName !== '-') {
+      const success = await clearFocusDistance(currentFileName);
+      if (success) {
+        setHasCustomFocus(false);
+        setFocusMode(FOCUS_MODE.IDLE);
+        addLog('Custom focus cleared, reload to apply default');
+      }
+    }
+  }, [currentFileName, addLog]);
 
   // Set up click listener and cursor when in focus-setting mode
   useEffect(() => {
@@ -277,25 +314,14 @@ function CameraControls() {
       case FOCUS_MODE.SETTING:
         return 'Click model...';
       case FOCUS_MODE.SET:
-        return 'Focus set ✓';
+        return 'Focus set';
+      case FOCUS_MODE.CUSTOM:
+        return 'Custom focus';
       default:
         return 'Set focus depth';
     }
   };
 
-  /**
-   * Returns the appropriate button class based on focus mode state.
-   */
-  const getFocusButtonClass = () => {
-    switch (focusMode) {
-      case FOCUS_MODE.SETTING:
-        return 'secondary focus-btn focus-setting';
-      case FOCUS_MODE.SET:
-        return 'secondary focus-btn focus-set';
-      default:
-        return 'secondary focus-btn';
-    }
-  };
 
   // Initialize camera range on mount
   useEffect(() => {
@@ -408,7 +434,7 @@ function CameraControls() {
               onInput={handleFovChange}
             />
             <span class="control-value">
-              {fov}°
+              {Math.round(fov)}°
             </span>
           </div>
         </div>
@@ -418,13 +444,32 @@ function CameraControls() {
           <button class="secondary" onClick={handleRecenterWithImmersive}>
             Recenter view
           </button>
-          <button 
-            class={getFocusButtonClass()}
-            onClick={focusMode === FOCUS_MODE.SETTING ? handleCancelFocusMode : handleStartFocusMode}
-            disabled={focusMode === FOCUS_MODE.SET}
-          >
-            {getFocusButtonText()}
-          </button>
+          
+          <div class="focus-control">
+            <button 
+              class={`secondary focus-main-btn ${
+                focusMode === FOCUS_MODE.SETTING ? 'is-setting' : 
+                focusMode === FOCUS_MODE.SET ? 'is-set' : 
+                focusMode === FOCUS_MODE.CUSTOM ? 'is-custom' : ''
+              }`}
+              onClick={focusMode === FOCUS_MODE.SETTING ? handleCancelFocusMode : handleStartFocusMode}
+              disabled={focusMode === FOCUS_MODE.SET}
+              aria-label={focusMode === FOCUS_MODE.CUSTOM ? "Custom focus - click to set a new focus" : "Set focus depth"}
+            >
+              {getFocusButtonText()}
+            </button>
+            
+            {focusMode === FOCUS_MODE.CUSTOM && (
+              <button
+                class="focus-clear-btn"
+                onClick={handleClearCustomFocus}
+                title="Clear custom focus"
+                aria-label="Clear custom focus"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

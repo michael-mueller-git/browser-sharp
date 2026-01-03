@@ -38,6 +38,9 @@ export const useStore = create((set, get) => ({
   animationIntensity: 'medium',
   animationDirection: 'left',
 
+  // Custom focus state
+  hasCustomFocus: false,
+
   // File info
   fileInfo: DEFAULT_FILE_INFO,
 
@@ -86,6 +89,9 @@ export const useStore = create((set, get) => ({
   
   /** Sets animation sweep direction */
   setAnimationDirection: (direction) => set({ animationDirection: direction }),
+
+  /** Sets custom focus state */
+  setHasCustomFocus: (hasCustomFocus) => set({ hasCustomFocus }),
   
   /** Updates file info (merges with existing) */
   setFileInfo: (info) => set((state) => ({ 
