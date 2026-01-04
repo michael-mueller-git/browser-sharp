@@ -68,6 +68,12 @@ const PREVIEW_CAPTURE_FRAME = 60;
 /** Page padding in pixels */
 const PAGE_PADDING = 36;
 
+/** Mobile sheet closed height (handle visible) */
+const MOBILE_SHEET_CLOSED_HEIGHT = 50;
+
+/** Mobile sheet open height as percentage of viewport (matches CSS max-height in portrait mode) */
+const MOBILE_SHEET_OPEN_HEIGHT_VH = 40;
+
 /** Accesses Zustand store state */
 const getStoreState = () => useStore.getState();
 
@@ -79,13 +85,24 @@ const supportedExtensionsText = supportedExtensions.join(", ");
  * Updates viewer dimensions based on window size and panel state.
  * If camera metadata provides an aspect ratio, constrains viewer to match it.
  * Otherwise fills available space.
+ * In mobile portrait mode, accounts for mobile sheet height.
  */
 export const updateViewerAspectRatio = () => {
   const viewerEl = document.getElementById('viewer');
   if (!viewerEl) return;
   
-  const availableWidth = Math.max(0, window.innerWidth - PAGE_PADDING);
-  const availableHeight = Math.max(0, window.innerHeight - PAGE_PADDING);
+  const { isMobile, isPortrait, panelOpen } = getStoreState();
+  
+  let availableWidth = Math.max(0, window.innerWidth - PAGE_PADDING);
+  let availableHeight = Math.max(0, window.innerHeight - PAGE_PADDING);
+  
+  // In mobile portrait mode, subtract the mobile sheet height from available space
+  if (isMobile && isPortrait) {
+    const sheetHeight = panelOpen 
+      ? (window.innerHeight * MOBILE_SHEET_OPEN_HEIGHT_VH / 100)
+      : MOBILE_SHEET_CLOSED_HEIGHT;
+    availableHeight = Math.max(0, window.innerHeight - sheetHeight - (PAGE_PADDING / 2));
+  }
 
   if (originalImageAspect && originalImageAspect > 0) {
     // Calculate what the aspect ratio of available space is

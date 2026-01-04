@@ -8,6 +8,31 @@ let animationState = null;
 let resetAnimationState = null;
 let anchorAnimationState = null;
 
+// Easing functions
+const easingFunctions = {
+  'linear': (t) => t,
+  'ease-in': (t) => t * t * t,
+  'ease-out': (t) => 1 - Math.pow(1 - t, 3),
+  'ease-in-out': (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+};
+
+// Sweep direction presets (startDeg is the offset from center)
+const sweepPresets = {
+  left: { axis: 'up', direction: 1 },
+  right: { axis: 'up', direction: -1 },
+  up: { axis: 'right', direction: -1 },
+  down: { axis: 'right', direction: 1 },
+};
+
+// Intensity presets
+const intensityPresets = {
+  subtle: { zoomFactor: 0.05, duration: 1200, sweepDegrees: 4 },
+  medium: { zoomFactor: 0.1, duration: 1800, sweepDegrees: 8 },
+  dramatic: { zoomFactor: 0.15, duration: 2400, sweepDegrees: 12 },
+};
+
+const validDirections = ['left', 'right', 'up', 'down', 'none'];
+
 // Get animation settings from store
 const getAnimationEnabled = () => getStoreState().animationEnabled;
 
@@ -17,31 +42,11 @@ export const setLoadAnimationEnabled = (enabled) => {
   getStoreState().setAnimationEnabled(enabled);
 };
 
-const sweepPresets = {
-  left: { axis: "up", startDeg: 4, endDeg: 0 },
-  right: { axis: "up", startDeg: -4, endDeg: 0 },
-  down: { axis: "right", startDeg: 4, endDeg: 0 },
-  up: { axis: "right", startDeg: -4, endDeg: 0 },
-};
-
-const sweepPresetKeys = Object.keys(sweepPresets);
-
-const intensityPresets = {
-  subtle: { zoomOutFactor: 1, duration: 1200, sweepMultiplier: 0.5 },
-  medium: { zoomOutFactor: 1.05, duration: 1800, sweepMultiplier: 1.0 },
-  dramatic: { zoomOutFactor: 1.1, duration: 2400, sweepMultiplier: 1.5 },
-};
-
-const validDirections = ["left", "right", "up", "down", "none"];
-
-const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
-
 export const cancelLoadZoomAnimation = () => {
   if (animationState?.frameId) {
     cancelAnimationFrame(animationState.frameId);
   }
   if (animationState) {
-    // Re-enable controls on cancel, stay at current position
     controls.enabled = animationState.wasEnabled;
     controls.update();
     requestRender();
@@ -52,7 +57,7 @@ export const cancelLoadZoomAnimation = () => {
 export const getLoadAnimationIntensityKey = () => getStoreState().animationIntensity;
 
 export const setLoadAnimationIntensity = (key) => {
-  if (intensityPresets[key]) {
+  if (intensityPresets[key] || key === 'custom') {
     getStoreState().setAnimationIntensity(key);
     return key;
   }
@@ -70,43 +75,73 @@ export const setLoadAnimationDirection = (direction) => {
   return getStoreState().animationDirection;
 };
 
+/**
+ * Builds animation parameters from either a preset or custom settings.
+ */
+const buildAnimationParams = (distance) => {
+  const state = getStoreState();
+  const intensityKey = state.animationIntensity;
+  
+  if (intensityKey === 'custom') {
+    const custom = state.customAnimation;
+    const duration = custom.duration * 1000; // Convert to ms
+    const easing = easingFunctions[custom.easing] ?? easingFunctions['ease-in-out'];
+    
+    // Rotation params
+    const rotationType = custom.rotationType;
+    const sweepDegrees = rotationType === 'none' ? 0 : custom.rotation;
+    const sweepPreset = sweepPresets[rotationType] ?? null;
+    
+    // Zoom params - animation behavior:
+    // zoomIn: start slightly before baseline → end zoomed in past baseline
+    // zoomOut: start close → end at baseline (no overshoot)
+    const zoomType = custom.zoomType;
+    const zoomAmount = custom.zoom * 0.15; // Scale to reasonable range
+    let startZoomOffset = 0;
+    let endZoomOffset = 0;
+    if (zoomType === 'in') {
+      startZoomOffset = zoomAmount * 0.2;   // Start slightly before baseline (20% of zoom amount)
+      endZoomOffset = -zoomAmount * 0.3;    // End zoomed in past baseline
+    } else if (zoomType === 'out') {
+      startZoomOffset = -zoomAmount * 0.5;  // Start zoomed in
+      endZoomOffset = 0;                    // End at baseline (no overshoot)
+    }
+    
+    return { duration, easing, sweepDegrees, sweepPreset, startZoomOffset, endZoomOffset };
+  }
+  
+  // Use preset (presets zoom out then settle at baseline)
+  const preset = intensityPresets[intensityKey] ?? intensityPresets.medium;
+  const direction = state.animationDirection;
+  const sweepPreset = direction === 'none' ? null : (sweepPresets[direction] ?? sweepPresets.left);
+  
+  return {
+    duration: preset.duration,
+    easing: easingFunctions['ease-out'],
+    sweepDegrees: preset.sweepDegrees,
+    sweepPreset,
+    startZoomOffset: preset.zoomFactor,
+    endZoomOffset: 0,
+  };
+};
+
 export const startLoadZoomAnimation = (options = {}) => {
-  const normalizedOptions =
-    typeof options === "string"
-      ? { direction: options }
-      : options ?? {};
-  const requestedDirection = normalizedOptions.direction?.toLowerCase?.() ?? null;
+  const normalizedOptions = typeof options === 'string' ? { direction: options } : options ?? {};
   const forcePlayback = Boolean(normalizedOptions.force);
 
-  const animationEnabled = getAnimationEnabled();
-  if (!camera || !controls || (!animationEnabled && !forcePlayback)) return;
+  if (!camera || !controls || (!getAnimationEnabled() && !forcePlayback)) return;
 
   const baseOffset = new THREE.Vector3().subVectors(camera.position, controls.target);
   const distance = baseOffset.length();
   if (!Number.isFinite(distance) || distance <= 0.01) return;
 
-  const currentIntensityKey = getLoadAnimationIntensityKey();
-  const currentDirectionChoice = getLoadAnimationDirection();
+  const { duration, easing, sweepDegrees, sweepPreset, startZoomOffset, endZoomOffset } = buildAnimationParams(distance);
   
-  const intensity = intensityPresets[currentIntensityKey] ?? intensityPresets.medium;
-  const sweepMultiplier = intensity.sweepMultiplier ?? 1;
+  // Skip if nothing to animate
+  if (duration <= 0 || (sweepDegrees === 0 && startZoomOffset === 0 && endZoomOffset === 0)) return;
 
-  const resolvedDirection = (() => {
-    if (requestedDirection && validDirections.includes(requestedDirection)) {
-      return requestedDirection;
-    }
-    if (validDirections.includes(currentDirectionChoice)) {
-      return currentDirectionChoice;
-    }
-    return "left";
-  })();
-
-  const upVector = (controls.object?.up ?? controls.up ?? new THREE.Vector3(0, 1, 0)).clone();
-  if (upVector.lengthSq() === 0) {
-    upVector.set(0, 1, 0);
-  }
-  upVector.normalize();
-
+  // Calculate axis vectors
+  const upVector = (controls.object?.up ?? controls.up ?? new THREE.Vector3(0, 1, 0)).clone().normalize();
   const rightVector = new THREE.Vector3().copy(baseOffset).cross(upVector);
   if (rightVector.lengthSq() < 1e-6) {
     rightVector.copy(upVector).cross(new THREE.Vector3(1, 0, 0));
@@ -116,29 +151,27 @@ export const startLoadZoomAnimation = (options = {}) => {
   }
   rightVector.normalize();
 
-  const presetKey = resolvedDirection === "none" ? null : resolvedDirection;
-  const preset = presetKey ? sweepPresets[presetKey] ?? sweepPresets[sweepPresetKeys[0]] : null;
-  const axisVector = (preset && preset.axis === "right" ? rightVector : upVector).clone();
+  // Determine sweep axis and angle
+  const axisVector = sweepPreset
+    ? (sweepPreset.axis === 'right' ? rightVector : upVector).clone()
+    : upVector.clone();
+  const startAngle = sweepPreset
+    ? THREE.MathUtils.degToRad(sweepDegrees * sweepPreset.direction)
+    : 0;
+  const endAngle = 0;
 
-  const maxOffset = Math.min(Math.max(distance * 0.08, 0.05), distance * 0.35);
-  const startRadius = distance * (intensity.zoomOutFactor ?? 1);
-  const endRadius = Math.max(distance - maxOffset, distance * 0.65);
-  const startAngle = THREE.MathUtils.degToRad((preset ? preset.startDeg : 0) * sweepMultiplier);
-  const endAngle = THREE.MathUtils.degToRad(preset?.endDeg ?? 0);
-  const duration = intensity.duration ?? 2600;
+  // Determine zoom radii (animation passes through baseline)
+  const startRadius = distance * (1 + startZoomOffset);
+  const endRadius = distance * (1 + endZoomOffset);
 
-  // Store the target to orbit around
+  // Store target and set initial position
   const animTarget = controls.target.clone();
-
-  // Move to start position without updating controls
   const initialOffset = baseOffset.clone().applyAxisAngle(axisVector, startAngle).setLength(startRadius);
   camera.position.copy(animTarget).add(initialOffset);
   camera.lookAt(animTarget);
-  
-  // Disable controls during animation to prevent internal state drift
+
   const wasEnabled = controls.enabled;
   controls.enabled = false;
-  
   requestRender();
 
   cancelLoadZoomAnimation();
@@ -151,8 +184,8 @@ export const startLoadZoomAnimation = (options = {}) => {
     }
 
     const elapsed = timestamp - animationState.startTime;
-    const t = Math.min(elapsed / duration, 1);
-    const eased = easeOutCubic(t);
+    const t = Math.min(elapsed / animationState.duration, 1);
+    const eased = animationState.easing(t);
 
     const angle = THREE.MathUtils.lerp(animationState.startAngle, animationState.endAngle, eased);
     const radius = THREE.MathUtils.lerp(animationState.startRadius, animationState.endRadius, eased);
@@ -167,7 +200,6 @@ export const startLoadZoomAnimation = (options = {}) => {
     if (t < 1) {
       animationState.frameId = requestAnimationFrame(animate);
     } else {
-      // Animation complete - re-enable controls at current position
       controls.enabled = animationState.wasEnabled;
       controls.update();
       requestRender();
@@ -179,21 +211,20 @@ export const startLoadZoomAnimation = (options = {}) => {
     frameId: requestAnimationFrame(animate),
     startTime: null,
     baseOffset,
-    upVector,
     axisVector,
-    rightVector,
     startAngle,
     endAngle,
     startRadius,
     endRadius,
     duration,
+    easing,
     animTarget,
     wasEnabled,
   };
 };
 
 // Smooth reset animation
-const easeInOutCubic = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const easeInOutCubic = easingFunctions['ease-in-out'];
 
 export const cancelResetAnimation = () => {
   if (resetAnimationState?.frameId) {

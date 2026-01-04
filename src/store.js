@@ -37,6 +37,17 @@ export const useStore = create((set, get) => ({
   animationEnabled: true,
   animationIntensity: 'medium',
   animationDirection: 'left',
+  
+  // Custom animation settings (used when intensity is 'custom')
+  customAnimation: {
+    duration: 2.5,
+    rotation: 30,
+    rotationType: 'left',
+    zoom: 1.0,
+    zoomType: 'out',
+    easing: 'ease-in-out',
+    dollyZoom: false,
+  },
 
   // Custom focus state
   hasCustomFocus: false,
@@ -89,6 +100,11 @@ export const useStore = create((set, get) => ({
   
   /** Sets animation sweep direction */
   setAnimationDirection: (direction) => set({ animationDirection: direction }),
+  
+  /** Updates custom animation settings (merges with existing) */
+  setCustomAnimation: (settings) => set((state) => ({
+    customAnimation: { ...state.customAnimation, ...settings }
+  })),
 
   /** Sets custom focus state */
   setHasCustomFocus: (hasCustomFocus) => set({ hasCustomFocus }),

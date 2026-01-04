@@ -230,6 +230,16 @@ function Viewer({ viewerReady }) {
       <div class="loading-overlay">
         <div class="loading-spinner"></div>
       </div>
+
+      <input 
+        ref={fileInputRef}
+        type="file" 
+        accept={formatAccept} 
+        multiple 
+        hidden 
+        onChange={handleFileChange}
+      />
+
       {isMobile ? (
         !hasMesh && (
           <div class="drop-help mobile-file-picker">
@@ -237,28 +247,22 @@ function Viewer({ viewerReady }) {
               Choose File
             </button>
             <div class="fine-print">Select PLY/SOG files • Spark + THREE 3DGS</div>
-            <input 
-              ref={fileInputRef}
-              type="file" 
-              accept={formatAccept} 
-              multiple 
-              hidden 
-              onChange={handleFileChange}
-            />
           </div>
         )
       ) : (
         !hasMesh && (
           <div class="drop-help">
             <div class="eyebrow">Drag PLY/SOG files or folders here</div>
-            <div class="fine-print">Drop multiple files to browse • Spark + THREE 3DGS</div>
+            <div class="fine-print">
+              Or <a href="#" onClick={(e) => { e.preventDefault(); handlePickFile(); }} style="color: inherit; text-decoration: underline; cursor: pointer; pointer-events: auto;">click here</a> to browse local files
+            </div>
           </div>
         )
       )}
       {/* Reset view button - mobile only, shown when mesh is loaded */}
       {isMobile && hasMesh && (
         <button 
-          class="reset-view-btn" 
+          class="sidebar-trigger-btn right" 
           onClick={() => {
             if (isImmersiveModeActive()) {
               recenterInImmersiveMode(restoreHomeView, 600);
@@ -269,7 +273,7 @@ function Viewer({ viewerReady }) {
           aria-label="Reset camera view"
           title="Reset view (R)"
         >
-          ⟲
+          reset
         </button>
       )}
     </div>

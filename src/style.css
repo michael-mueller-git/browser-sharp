@@ -185,22 +185,42 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
-.side::-webkit-scrollbar {
-  width: 6px;
+
+
+/* Global scrollbar variables and rules (WebKit + Firefox)
+   These apply the same appearance to any scrollable element.
+*/
+:root {
+  --scroll-thumb: rgba(110, 231, 255, 0.3);
+  --scroll-thumb-hover: rgba(110, 231, 255, 0.5);
+  --scroll-track: rgba(255, 255, 255, 0.05);
+  --scroll-width: 6px;
 }
 
-.side::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 3px;
+/* Firefox: thin + colored thumb/track */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
 }
 
-.side::-webkit-scrollbar-thumb {
-  background: rgba(110, 231, 255, 0.3);
-  border-radius: 3px;
+/* WebKit-based browsers */
+*::-webkit-scrollbar {
+  width: var(--scroll-width);
+  height: var(--scroll-width);
 }
 
-.side::-webkit-scrollbar-thumb:hover {
-  background: rgba(110, 231, 255, 0.5);
+*::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+  border-radius: 6px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 6px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
 }
 
 .page:not(.panel-open) .side {
@@ -385,17 +405,17 @@ body {
 }
 
 .select-row select {
-  flex: 1;
   appearance: none;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(0, 0, 0, 0.25);
   color: #e6ecf8;
-  padding: 6px 10px;
+  padding: 4px 8px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: border-color 0.2s ease, background 0.2s ease;
+  width: 110px;
 }
 
 .select-row select:focus-visible {
@@ -598,8 +618,8 @@ body {
   .panel-toggle {
     top: 12px;
     right: 12px;
-    width: 40px;
-    height: 40px;
+    width: 30px;
+    height: 30px;
     font-size: 16px;
   }
   
@@ -616,6 +636,15 @@ body {
 @media (max-width: 768px) and (orientation: portrait) {
   .page {
     padding: 0;
+    /* Keep viewer centered when sheet is closed */
+    padding-bottom: 50px;
+  }
+
+  .page.panel-open {
+    /* When sheet opens, move viewer to top with small padding */
+    align-items: flex-start;
+    padding-top: 12px;
+    padding-bottom: 0;
   }
 
   .mobile-sheet {
@@ -803,6 +832,29 @@ body {
 .focus-clear-btn:hover {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
+}
+
+.replay-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.7);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+.replay-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+.replay-btn:active {
+  transform: scale(0.95);
 }
 
 @keyframes focus-pulse {
@@ -1066,15 +1118,15 @@ select option {
 /* Reset view button */
 .reset-view-btn {
   position: fixed;
-  bottom: 24px;
+  bottom: 20px;
   right: 24px;
-  width: 52px;
-  height: 52px;
+  width: 38px;
+  height: 38px;
   border-radius: 26px;
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: rgba(14, 18, 28, 0.85);
-  color: #6ee7ff;
-  font-size: 28px;
+  color: #7ac3d1;
+  font-size: 20px;
   font-weight: 400;
   line-height: 1;
   cursor: pointer;
@@ -1136,7 +1188,7 @@ select option {
   width: auto;
   display: flex;
   flex-direction: column;
-  max-height: 88vh;
+  max-height: 50vh;
   background: rgba(12, 16, 26, 0.78);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px 12px 0 0;
@@ -1182,9 +1234,9 @@ select option {
 .mobile-sheet .drag-handle-touch-target {
   position: absolute;
   /* background-color: red; */
-  top: -40px;
-  left: -12px;
-  right: -12px;
+  top: -20px;
+  left: 60px;
+  right: 60px;
   bottom: -10px;
   cursor: grab;
   z-index: 10;
@@ -1202,3 +1254,138 @@ select option {
 .mobile-sheet .drag-handle-touch-target:active + .drag-handle-bar {
   background: rgba(255, 255, 255, 0.5);
 }
+
+/* Asset Sidebar */
+.asset-sidebar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100px;
+  background: rgba(12, 16, 26, 0.331);
+  backdrop-filter: blur(6px);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 10;
+  transform: translateX(-100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+.asset-sidebar.visible {
+  transform: translateX(0);
+}
+
+.sidebar-hover-target {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  z-index: 9;
+}
+
+.sidebar-trigger-btn {
+    position: fixed;
+
+  bottom: 20px;
+  background: rgba(12, 16, 26, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.8);
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 8;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.sidebar-trigger-btn.left {
+  left: 20px;
+}
+.sidebar-trigger-btn.right {
+  right: 20px;
+}
+
+.sidebar-trigger-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.sidebar-trigger-btn.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-20px);
+}
+
+.asset-list-vertical {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scrollbar-width: none; /* Firefox */
+}
+
+.asset-list-vertical::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+.asset-item-vertical {
+  width: 100%;
+  aspect-ratio: 1;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.asset-item-vertical:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.asset-item-vertical.active {
+  border-color: #6ee7ff;
+  box-shadow: 0 0 12px rgba(110, 231, 255, 0.2);
+}
+
+.asset-item-vertical .asset-preview {
+  width: 100%;
+  height: 100%;
+}
+
+.asset-item-vertical img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sidebar-footer {
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+
+@media (max-width: 768px) and (orientation: portrait) {
+  .sidebar-trigger-btn {
+    bottom: 55px;
+  }
+  .reset-view-btn {
+    bottom: 50px;
+  }
+}
+

@@ -6,7 +6,7 @@
 
 import { useCallback } from 'preact/hooks';
 import { useStore } from '../store';
-import { setLoadAnimationEnabled, setLoadAnimationIntensity, setLoadAnimationDirection } from '../cameraAnimations';
+import { setLoadAnimationEnabled, setLoadAnimationIntensity, setLoadAnimationDirection, startLoadZoomAnimation } from '../cameraAnimations';
 import { saveAnimationSettings } from '../fileStorage';
 
 /** Animation style options with display labels */
@@ -14,15 +14,29 @@ const INTENSITY_OPTIONS = [
   { value: 'subtle', label: 'Subtle' },
   { value: 'medium', label: 'Medium' },
   { value: 'dramatic', label: 'Dramatic' },
+  { value: 'custom', label: 'Custom' },
 ];
 
 /** Animation direction options with display labels */
 const DIRECTION_OPTIONS = [
   { value: 'left', label: 'Left' },
   { value: 'right', label: 'Right' },
-  { value: 'up', label: 'Top' },
-  { value: 'down', label: 'Bottom' },
+  { value: 'up', label: 'Up' },
+  { value: 'down', label: 'Down' },
   { value: 'none', label: 'None' },
+];
+
+const ZOOM_TYPE_OPTIONS = [
+  { value: 'in', label: 'In' },
+  { value: 'out', label: 'Out' },
+  { value: 'none', label: 'None' },
+];
+
+const EASING_OPTIONS = [
+  { value: 'ease-in-out', label: 'Ease In Out' },
+  { value: 'ease-in', label: 'Ease In' },
+  { value: 'ease-out', label: 'Ease Out' },
+  { value: 'linear', label: 'Linear' },
 ];
 
 function AnimationSettings() {
@@ -31,12 +45,14 @@ function AnimationSettings() {
   const animationIntensity = useStore((state) => state.animationIntensity);
   const animationDirection = useStore((state) => state.animationDirection);
   const animSettingsExpanded = useStore((state) => state.animSettingsExpanded);
+  const customAnimation = useStore((state) => state.customAnimation);
   const currentFileName = useStore((state) => state.fileInfo?.name);
   
   // Store actions
   const setAnimationEnabledStore = useStore((state) => state.setAnimationEnabled);
   const setAnimationIntensityStore = useStore((state) => state.setAnimationIntensity);
   const setAnimationDirectionStore = useStore((state) => state.setAnimationDirection);
+  const setCustomAnimation = useStore((state) => state.setCustomAnimation);
   const toggleAnimSettingsExpanded = useStore((state) => state.toggleAnimSettingsExpanded);
 
   /**
@@ -107,14 +123,24 @@ function AnimationSettings() {
         {/* Enable/disable toggle */}
         <div class="control-row animate-toggle-row">
           <span class="control-label">Animate on load</span>
-          <label class="switch">
-            <input
-              type="checkbox"
-              checked={animationEnabled}
-              onChange={handleToggleAnimation}
-            />
-            <span class="switch-track" aria-hidden="true" />
-          </label>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label class="switch">
+              <input
+                type="checkbox"
+                checked={animationEnabled}
+                onChange={handleToggleAnimation}
+              />
+              <span class="switch-track" aria-hidden="true" />
+            </label>
+            <button
+              class="replay-btn"
+              onClick={() => startLoadZoomAnimation({ force: true })}
+              title="Replay animation"
+              aria-label="Replay animation"
+            >
+              ↻
+            </button>
+          </div>
         </div>
         
         {/* Intensity selector */}
@@ -127,15 +153,110 @@ function AnimationSettings() {
           </select>
         </div>
         
-        {/* Direction selector */}
-        <div class="control-row select-row">
-          <span class="control-label">Direction</span>
-          <select value={animationDirection} onChange={handleDirectionChange}>
-            {DIRECTION_OPTIONS.map(({ value, label }) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </div>
+        {/* Direction selector - hidden in custom mode */}
+        {animationIntensity !== 'custom' && (
+          <div class="control-row select-row">
+            <span class="control-label">Direction</span>
+            <select value={animationDirection} onChange={handleDirectionChange}>
+              {DIRECTION_OPTIONS.map(({ value, label }) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Custom settings - only shown when style is 'custom' */}
+        {animationIntensity === 'custom' && (
+          <>
+            <div class="control-row">
+              <span class="control-label">Duration</span>
+              <div class="control-track">
+                <input
+                  type="range"
+                  min="0"
+                  max="5"
+                  step="0.1"
+                  value={customAnimation.duration}
+                  onInput={(e) => setCustomAnimation({ duration: Number(e.target.value) })}
+                />
+                <span class="control-value">{customAnimation.duration}s</span>
+              </div>
+            </div>
+
+            <div class="control-row select-row">
+              <span class="control-label">Easing</span>
+              <select value={customAnimation.easing} onChange={(e) => setCustomAnimation({ easing: e.target.value })}>
+                {EASING_OPTIONS.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div class="control-row select-row">
+              <span class="control-label">Rotation</span>
+              <select value={customAnimation.rotationType} onChange={(e) => setCustomAnimation({ rotationType: e.target.value })}>
+                {DIRECTION_OPTIONS.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+
+            {customAnimation.rotationType !== 'none' && (
+              <div class="control-row">
+                <span class="control-label">Degrees</span>
+                <div class="control-track">
+                  <input
+                    type="range"
+                    min="0"
+                    max="60"
+                    step="1"
+                    value={customAnimation.rotation}
+                    onInput={(e) => setCustomAnimation({ rotation: Number(e.target.value) })}
+                  />
+                  <span class="control-value">{customAnimation.rotation}°</span>
+                </div>
+              </div>
+            )}
+
+            <div class="control-row select-row">
+              <span class="control-label">Zoom</span>
+              <select value={customAnimation.zoomType} onChange={(e) => setCustomAnimation({ zoomType: e.target.value })}>
+                {ZOOM_TYPE_OPTIONS.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+
+            {customAnimation.zoomType !== 'none' && (
+              <div class="control-row">
+                <span class="control-label">Amount</span>
+                <div class="control-track">
+                  <input
+                    type="range"
+                    min="0"
+                    max="4"
+                    step="0.1"
+                    value={customAnimation.zoom}
+                    onInput={(e) => setCustomAnimation({ zoom: Number(e.target.value) })}
+                  />
+                  <span class="control-value">{customAnimation.zoom}x</span>
+                </div>
+              </div>
+            )}
+
+            <div class="control-row animate-toggle-row">
+              <span class="control-label">Dolly Zoom</span>
+              <label class="switch">
+                <input
+                  type="checkbox"
+                  checked={customAnimation.dollyZoom}
+                  onChange={(e) => setCustomAnimation({ dollyZoom: e.target.checked })}
+                />
+                <span class="switch-track" aria-hidden="true" />
+              </label>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

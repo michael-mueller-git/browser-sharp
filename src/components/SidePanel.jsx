@@ -4,16 +4,9 @@
  * Collapsible via toggle button.
  */
 
-import { useRef, useCallback } from 'preact/hooks';
 import { useStore } from '../store';
 import CameraControls from './CameraControls';
 import AnimationSettings from './AnimationSettings';
-import AssetGallery from './AssetGallery';
-import { getFormatAccept } from '../formats/index';
-import { handleMultipleFiles } from '../fileLoader';
-
-/** File input accept attribute value */
-const formatAccept = getFormatAccept();
 
 function SidePanel() {
   // Store state
@@ -23,27 +16,6 @@ function SidePanel() {
   
   // Store actions
   const togglePanel = useStore((state) => state.togglePanel);
-
-  // Ref for file input
-  const fileInputRef = useRef(null);
-
-  /**
-   * Triggers file picker dialog.
-   */
-  const handlePickFile = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
-
-  /**
-   * Handles file selection from file picker.
-   */
-  const handleFileChange = useCallback(async (event) => {
-    const files = event.target.files;
-    if (files && files.length > 0) {
-      await handleMultipleFiles(Array.from(files));
-      event.target.value = '';
-    }
-  }, []);
 
   return (
     <>
@@ -59,25 +31,6 @@ function SidePanel() {
       
       {/* Side panel content */}
       <div class="side">
-        {/* Header with file upload - hidden on mobile */}
-        {!isMobile && (
-          <div class="header">
-            <div>
-              <div class="title">3DGS File Upload</div>
-            </div>
-            <button class="primary" onClick={handlePickFile}>
-              Choose File
-            </button>
-            <input 
-              ref={fileInputRef}
-              type="file" 
-              accept={formatAccept} 
-              multiple 
-              hidden 
-              onChange={handleFileChange}
-            />
-          </div>
-        )}
         
         {/* File info display - hidden on mobile */}
         {!isMobile && (
@@ -108,7 +61,7 @@ function SidePanel() {
         {/* Settings panels */}
         <CameraControls />
         <AnimationSettings />
-        <AssetGallery />
+        {/* <AssetGallery /> */}
       </div>
     </>
   );

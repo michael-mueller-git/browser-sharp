@@ -9,6 +9,7 @@ import { useStore } from '../store';
 import Viewer from './Viewer';
 import SidePanel from './SidePanel';
 import MobileSheet from './MobileSheet';
+import AssetSidebar from './AssetSidebar';
 import { initViewer, startRenderLoop } from '../viewer';
 import { resize } from '../fileLoader';
 
@@ -34,11 +35,6 @@ function App() {
       const mobile = Math.min(window.innerWidth, window.innerHeight) <= 768;
       const portrait = window.innerHeight > window.innerWidth;
       setMobileState(mobile, portrait);
-      
-      // Open panel on desktop by default (only on first load)
-      if (!mobile && !panelOpen) {
-        togglePanel();
-      }
     };
     
     updateMobileState();
@@ -67,8 +63,23 @@ function App() {
     };
   }, []);
 
+  /**
+   * Resize viewer when panel opens/closes in mobile portrait mode.
+   * This ensures the viewer adjusts to the mobile sheet's expanded height.
+   */
+  useEffect(() => {
+    if (isMobile && isPortrait && viewerReady) {
+      // Small delay to allow sheet animation to start
+      const timer = setTimeout(() => {
+        resize();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [panelOpen, isMobile, isPortrait, viewerReady]);
+
   return (
     <div class={`page ${panelOpen ? 'panel-open' : ''}`}>
+      <AssetSidebar />
       <Viewer viewerReady={viewerReady} />
       {isMobile && isPortrait ? <MobileSheet /> : <SidePanel />}
     </div>

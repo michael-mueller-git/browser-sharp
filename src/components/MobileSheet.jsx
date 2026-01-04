@@ -7,7 +7,6 @@ import { useRef, useCallback, useState } from 'preact/hooks';
 import { useStore } from '../store';
 import CameraControls from './CameraControls';
 import AnimationSettings from './AnimationSettings';
-import AssetGallery from './AssetGallery';
 import { getFormatAccept } from '../formats/index';
 import { handleMultipleFiles } from '../fileLoader';
 
@@ -109,7 +108,7 @@ function MobileSheet() {
       <div class="mobile-sheet-content">
         <CameraControls />
         <AnimationSettings />
-        <AssetGallery />
+        {/* <AssetGallery /> */}
       </div>
     </div>
   );
