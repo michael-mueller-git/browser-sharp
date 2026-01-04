@@ -10,7 +10,7 @@ import { applyCameraRangeDegrees, restoreHomeView } from '../cameraUtils';
 import { currentMesh, raycaster, SplatMesh, scene } from '../viewer';
 import { updateDollyZoomBaselineFromCamera } from '../viewer';
 import { startAnchorTransition } from '../cameraAnimations';
-import { enableImmersiveMode, disableImmersiveMode, recenterInImmersiveMode, isImmersiveModeActive } from '../immersiveMode';
+import { enableImmersiveMode, disableImmersiveMode, recenterInImmersiveMode, isImmersiveModeActive, pauseImmersiveMode, resumeImmersiveMode } from '../immersiveMode';
 import { saveFocusDistance, clearFocusDistance } from '../fileStorage';
 
 /** Default orbit range in degrees */
@@ -255,6 +255,9 @@ function CameraControls() {
     }
   }, [focusMode, handleFocusClick, handleCancelFocusMode]);
 
+  // Track if we're actively adjusting FOV to pause immersive mode
+  const fovAdjustTimeoutRef = useRef(null);
+
   /**
    * Handles FOV slider changes with dolly-zoom compensation.
    * Maintains the apparent size of objects at the focus point by
@@ -263,6 +266,19 @@ function CameraControls() {
   const handleFovChange = (e) => {
     const newFov = Number(e.target.value);
     if (!Number.isFinite(newFov) || !camera || !controls) return;
+
+    // Pause immersive mode during adjustment to prevent judder
+    if (isImmersiveModeActive()) {
+      pauseImmersiveMode();
+      // Clear existing timeout and set a new one
+      if (fovAdjustTimeoutRef.current) {
+        clearTimeout(fovAdjustTimeoutRef.current);
+      }
+      fovAdjustTimeoutRef.current = setTimeout(() => {
+        resumeImmersiveMode();
+        fovAdjustTimeoutRef.current = null;
+      }, 300);
+    }
 
     setFov(newFov);
 
@@ -285,6 +301,9 @@ function CameraControls() {
     requestRender();
   };
 
+  // Track if we're actively adjusting camera range to pause immersive mode
+  const rangeAdjustTimeoutRef = useRef(null);
+
   /**
    * Handles orbit range slider changes.
    * Converts linear slider value to non-linear degrees for intuitive control.
@@ -292,6 +311,18 @@ function CameraControls() {
   const handleCameraRangeChange = (e) => {
     const val = Number.parseFloat(e.target.value);
     if (!Number.isFinite(val) || !controls) return;
+
+    // Pause immersive mode during adjustment to prevent judder
+    if (isImmersiveModeActive()) {
+      pauseImmersiveMode();
+      if (rangeAdjustTimeoutRef.current) {
+        clearTimeout(rangeAdjustTimeoutRef.current);
+      }
+      rangeAdjustTimeoutRef.current = setTimeout(() => {
+        resumeImmersiveMode();
+        rangeAdjustTimeoutRef.current = null;
+      }, 300);
+    }
 
     const degrees = sliderValueToDegrees(val);
     setCameraRange(degrees);
@@ -334,6 +365,51 @@ function CameraControls() {
     setCameraRange(degrees);
     applyCameraRangeDegrees(degrees);
   }, [setCameraRange]);
+
+  // Pause immersive mode during pinch-zoom gestures on viewer
+  useEffect(() => {
+    if (!isMobile) return;
+    
+    const viewerEl = document.getElementById('viewer');
+    if (!viewerEl) return;
+    
+    let pinchResumeTimeout = null;
+    let activeTouches = 0;
+    
+    const handleTouchStart = (e) => {
+      activeTouches = e.touches.length;
+      // Pause when 2+ fingers touch (pinch gesture starting)
+      if (activeTouches >= 2 && isImmersiveModeActive()) {
+        pauseImmersiveMode();
+        if (pinchResumeTimeout) {
+          clearTimeout(pinchResumeTimeout);
+          pinchResumeTimeout = null;
+        }
+      }
+    };
+    
+    const handleTouchEnd = (e) => {
+      activeTouches = e.touches.length;
+      // Resume shortly after all fingers lifted
+      if (activeTouches === 0 && isImmersiveModeActive()) {
+        pinchResumeTimeout = setTimeout(() => {
+          resumeImmersiveMode();
+          pinchResumeTimeout = null;
+        }, 200);
+      }
+    };
+    
+    viewerEl.addEventListener('touchstart', handleTouchStart, { passive: true });
+    viewerEl.addEventListener('touchend', handleTouchEnd, { passive: true });
+    viewerEl.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+    
+    return () => {
+      viewerEl.removeEventListener('touchstart', handleTouchStart);
+      viewerEl.removeEventListener('touchend', handleTouchEnd);
+      viewerEl.removeEventListener('touchcancel', handleTouchEnd);
+      if (pinchResumeTimeout) clearTimeout(pinchResumeTimeout);
+    };
+  }, [isMobile]);
 
   /**
    * Handles toggling immersive mode.

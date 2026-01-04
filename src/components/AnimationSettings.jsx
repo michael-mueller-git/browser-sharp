@@ -7,7 +7,8 @@
 import { useCallback } from 'preact/hooks';
 import { useStore } from '../store';
 import { setLoadAnimationEnabled, setLoadAnimationIntensity, setLoadAnimationDirection, startLoadZoomAnimation } from '../cameraAnimations';
-import { saveAnimationSettings } from '../fileStorage';
+import { saveAnimationSettings, savePreviewImage } from '../fileStorage';
+import { scene, renderer, composer, THREE, currentMesh } from '../viewer';
 
 /** Animation style options with display labels */
 const INTENSITY_OPTIONS = [
@@ -103,6 +104,56 @@ function AnimationSettings() {
     persistAnimationSettings(animationEnabled, animationIntensity, direction);
   }, [setAnimationDirectionStore, persistAnimationSettings, animationEnabled, animationIntensity]);
 
+  /**
+   * Captures a preview thumbnail of the current render.
+   * @returns {string|null} Data URL of captured image, or null if no mesh loaded
+   */
+  const capturePreviewThumbnail = () => {
+    if (!currentMesh) return null;
+    
+    // Render with solid background for capture
+    scene.background = new THREE.Color("#0c1018");
+    renderer.setClearColor(0x0c1018, 1);
+    composer.render();
+    
+    const dataUrl = renderer.domElement.toDataURL("image/jpeg", 0.85);
+    
+    // Restore transparent background
+    scene.background = null;
+    renderer.setClearColor(0x000000, 0);
+    
+    return dataUrl;
+  };
+
+  /**
+   * Handles replay animation with preview capture.
+   */
+  const handleReplayAnimation = useCallback(() => {
+    startLoadZoomAnimation({ 
+      force: true,
+      onComplete: () => {
+        // Wait a few frames for render to stabilize, then capture preview
+        let frameCount = 0;
+        const waitAndCapture = () => {
+          frameCount++;
+          if (frameCount < 30) {
+            requestAnimationFrame(waitAndCapture);
+          } else {
+            const previewUrl = capturePreviewThumbnail();
+            if (previewUrl && currentFileName && currentFileName !== '-') {
+              const sizeKB = (previewUrl.length * 0.75 / 1024).toFixed(1);
+              console.log(`Preview updated (${sizeKB} KB)`);
+              savePreviewImage(currentFileName, previewUrl).catch(err => {
+                console.warn('Failed to save preview:', err);
+              });
+            }
+          }
+        };
+        requestAnimationFrame(waitAndCapture);
+      }
+    });
+  }, [currentFileName]);
+
   return (
     <div class="settings-group">
       {/* Collapsible header */}
@@ -134,7 +185,7 @@ function AnimationSettings() {
             </label>
             <button
               class="replay-btn"
-              onClick={() => startLoadZoomAnimation({ force: true })}
+              onClick={handleReplayAnimation}
               title="Replay animation"
               aria-label="Replay animation"
             >

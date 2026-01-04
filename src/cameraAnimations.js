@@ -128,6 +128,7 @@ const buildAnimationParams = (distance) => {
 export const startLoadZoomAnimation = (options = {}) => {
   const normalizedOptions = typeof options === 'string' ? { direction: options } : options ?? {};
   const forcePlayback = Boolean(normalizedOptions.force);
+  const onComplete = normalizedOptions.onComplete;
 
   if (!camera || !controls || (!getAnimationEnabled() && !forcePlayback)) return;
 
@@ -172,6 +173,19 @@ export const startLoadZoomAnimation = (options = {}) => {
 
   const wasEnabled = controls.enabled;
   controls.enabled = false;
+  
+  // Store current orbit limits and disable them for animation
+  const savedLimits = {
+    minAzimuthAngle: controls.minAzimuthAngle,
+    maxAzimuthAngle: controls.maxAzimuthAngle,
+    minPolarAngle: controls.minPolarAngle,
+    maxPolarAngle: controls.maxPolarAngle,
+  };
+  controls.minAzimuthAngle = -Infinity;
+  controls.maxAzimuthAngle = Infinity;
+  controls.minPolarAngle = 0;
+  controls.maxPolarAngle = Math.PI;
+  
   requestRender();
 
   cancelLoadZoomAnimation();
@@ -200,10 +214,19 @@ export const startLoadZoomAnimation = (options = {}) => {
     if (t < 1) {
       animationState.frameId = requestAnimationFrame(animate);
     } else {
+      // Restore orbit limits after animation
+      controls.minAzimuthAngle = animationState.savedLimits.minAzimuthAngle;
+      controls.maxAzimuthAngle = animationState.savedLimits.maxAzimuthAngle;
+      controls.minPolarAngle = animationState.savedLimits.minPolarAngle;
+      controls.maxPolarAngle = animationState.savedLimits.maxPolarAngle;
+      
       controls.enabled = animationState.wasEnabled;
       controls.update();
       requestRender();
+      
+      const callback = animationState.onComplete;
       animationState = null;
+      if (callback) callback();
     }
   };
 
@@ -220,6 +243,8 @@ export const startLoadZoomAnimation = (options = {}) => {
     easing,
     animTarget,
     wasEnabled,
+    savedLimits,
+    onComplete,
   };
 };
 

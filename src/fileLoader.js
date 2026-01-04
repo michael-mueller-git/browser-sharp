@@ -41,6 +41,7 @@ import {
   applyCameraProjection,
 } from "./cameraUtils.js";
 import { startLoadZoomAnimation } from "./cameraAnimations.js";
+import { isImmersiveModeActive, pauseImmersiveMode, resumeImmersiveMode } from "./immersiveMode.js";
 import {
   setAssetList as setAssetListManager,
   getAssetList,
@@ -54,6 +55,7 @@ import {
   prevAsset,
   setCapturePreviewFn,
   captureCurrentAssetPreview,
+  addAssets,
 } from "./assetManager.js";
 
 /** Warmup frames for renderer stabilization */
@@ -98,9 +100,9 @@ export const updateViewerAspectRatio = () => {
   
   // In mobile portrait mode, subtract the mobile sheet height from available space
   if (isMobile && isPortrait) {
-    const sheetHeight = panelOpen 
-      ? (window.innerHeight * MOBILE_SHEET_OPEN_HEIGHT_VH / 100)
-      : MOBILE_SHEET_CLOSED_HEIGHT;
+    // Always use closed height to prevent viewer resize/camera reset when opening sheet
+    // The sheet will overlay the bottom of the viewer
+    const sheetHeight = MOBILE_SHEET_CLOSED_HEIGHT;
     availableHeight = Math.max(0, window.innerHeight - sheetHeight - (PAGE_PADDING / 2));
   }
 
@@ -274,6 +276,12 @@ export const loadSplatFile = async (file) => {
   // Set file name early so components can save settings
   store.setFileInfo({ name: file.name });
 
+  // Check if immersive mode is active - we'll pause it during load and skip animations
+  const wasImmersiveModeActive = isImmersiveModeActive();
+  if (wasImmersiveModeActive) {
+    pauseImmersiveMode();
+  }
+
   // Load stored settings for this file
   let focusDistanceOverride = undefined;
   const storedSettings = await loadFileSettings(file.name);
@@ -285,16 +293,21 @@ export const loadSplatFile = async (file) => {
       applyPreviewAsBackground(storedSettings.preview);
     }
 
-    // Apply stored animation settings
+    // Apply stored animation settings (but not if immersive mode is active)
     if (storedSettings.animation) {
       const { enabled, intensity, direction } = storedSettings.animation;
+      // Store settings in state even if immersive mode is active (for when it's disabled)
       store.setAnimationEnabled(enabled);
       store.setAnimationIntensity(intensity);
       store.setAnimationDirection(direction);
-      const { setLoadAnimationEnabled, setLoadAnimationIntensity, setLoadAnimationDirection } = await import('./cameraAnimations.js');
-      setLoadAnimationEnabled(enabled);
-      setLoadAnimationIntensity(intensity);
-      setLoadAnimationDirection(direction);
+      
+      // Only apply to animation module if not in immersive mode
+      if (!wasImmersiveModeActive) {
+        const { setLoadAnimationEnabled, setLoadAnimationIntensity, setLoadAnimationDirection } = await import('./cameraAnimations.js');
+        setLoadAnimationEnabled(enabled);
+        setLoadAnimationIntensity(intensity);
+        setLoadAnimationDirection(direction);
+      }
     }
 
     // Store focus distance override for later application (after camera is positioned)
@@ -404,7 +417,10 @@ export const loadSplatFile = async (file) => {
     // Save home view BEFORE animation so we capture the correct position
     saveHomeView();
 
-    startLoadZoomAnimation();
+    // Skip load animation if immersive mode is active, otherwise play it
+    if (!wasImmersiveModeActive) {
+      startLoadZoomAnimation();
+    }
 
     // Warmup frames for spark renderer stabilization
     let warmupFrames = WARMUP_FRAMES;
@@ -453,6 +469,11 @@ export const loadSplatFile = async (file) => {
             store.addLog('Using stored preview from IndexedDB');
           }
         }
+      } else {
+        // Warmup complete - resume immersive mode if it was active
+        if (wasImmersiveModeActive) {
+          resumeImmersiveMode();
+        }
       }
     };
     warmup();
@@ -486,6 +507,11 @@ export const loadSplatFile = async (file) => {
     store.setIsLoading(false);
     clearMetadataCamera(resize);
     store.setStatus("Load failed, please check the file or console log");
+    
+    // Resume immersive mode even on error
+    if (wasImmersiveModeActive) {
+      resumeImmersiveMode();
+    }
   }
 };
 
@@ -671,10 +697,45 @@ export const handleMultipleFiles = async (files) => {
  * Called from AssetGallery component when user clicks a thumbnail.
  * @param {number} index - Asset index to load
  */
-export const loadAssetByIndex = async (index) => {
-  const currentIndex = getCurrentAssetIndex();
-  if (index === currentIndex) return;
+/**
+ * Adds files to the existing asset list.
+ */
+export const handleAddFiles = async (files) => {
+  if (!files || files.length === 0) return;
+  const store = getStoreState();
   
+  const result = await addAssets(files);
+  
+  if (result.added === 0) {
+    store.setStatus(`No supported files found. Supported: ${supportedExtensionsText}`);
+    return;
+  }
+  
+  // Update store with new assets list
+  const allAssets = getAssetList();
+  store.setAssets([...allAssets]);
+  
+  store.addLog(`Added ${result.added} assets`);
+  
+  // Load stored previews for new assets
+  const { loadFileSettings } = await import('./fileStorage.js');
+  
+  const startIndex = allAssets.length - result.added;
+  
+  for (let i = 0; i < result.newAssets.length; i++) {
+    const asset = result.newAssets[i];
+    const globalIndex = startIndex + i;
+    
+    const storedSettings = await loadFileSettings(asset.name);
+    if (storedSettings?.preview && !asset.preview) {
+      asset.preview = storedSettings.preview;
+      asset.previewSource = 'indexeddb';
+      store.updateAssetPreview(globalIndex, asset.preview);
+    }
+  }
+};
+
+export const loadAssetByIndex = async (index) => {
   const asset = getAssetByIndex(index);
   if (!asset) return;
   

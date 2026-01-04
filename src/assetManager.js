@@ -125,6 +125,41 @@ const matchPreviewImages = async (assets, imageFiles) => {
 };
 
 /**
+ * Add files to the existing asset list
+ */
+export const addAssets = async (files) => {
+  const supportedFiles = filterSupportedFiles(files);
+  
+  if (supportedFiles.length === 0) {
+    return { count: assetList.length, added: 0, newAssets: [] };
+  }
+  
+  // Find image files for potential preview matching
+  const imageFiles = findImageFiles(files);
+  
+  const startId = assetList.length;
+  
+  // Create new asset entries
+  const newAssets = supportedFiles.map((file, index) => ({
+    id: `asset-${Date.now()}-${startId + index}`,
+    file,
+    name: file.name,
+    preview: null,
+    previewSource: null,
+    loaded: false,
+  }));
+  
+  // Try to match assets with image previews
+  if (imageFiles.length > 0) {
+    await matchPreviewImages(newAssets, imageFiles);
+  }
+  
+  assetList = [...assetList, ...newAssets];
+  
+  return { count: assetList.length, added: newAssets.length, newAssets };
+};
+
+/**
  * Set the asset list from files (single file, multiple files, or folder contents)
  * Also looks for matching image files to use as previews
  */
@@ -188,6 +223,31 @@ export const setCurrentAssetIndex = (index) => {
   if (index < 0 || index >= assetList.length) return false;
   currentAssetIndex = index;
   assetList[index].loaded = true;
+  return true;
+};
+
+/**
+ * Remove an asset by index
+ */
+export const removeAsset = (index) => {
+  if (index < 0 || index >= assetList.length) return false;
+  
+  assetList.splice(index, 1);
+  
+  // Update current index if needed
+  if (assetList.length === 0) {
+    currentAssetIndex = -1;
+  } else if (currentAssetIndex >= index) {
+    // If we removed the current asset or one before it, adjust index
+    if (currentAssetIndex === index) {
+        if (currentAssetIndex >= assetList.length) {
+            currentAssetIndex = Math.max(0, assetList.length - 1);
+        }
+    } else {
+        currentAssetIndex--;
+    }
+  }
+  
   return true;
 };
 
