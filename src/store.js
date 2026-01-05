@@ -77,6 +77,7 @@ export const useStore = create((set, get) => ({
   isMobile: false,
   isPortrait: false,
   immersiveMode: false,
+  immersiveSensitivity: 1.0,
   
   // Debug
   debugLoadingMode: false,
@@ -186,6 +187,9 @@ export const useStore = create((set, get) => ({
   
   /** Toggles immersive mode */
   toggleImmersiveMode: () => set((state) => ({ immersiveMode: !state.immersiveMode })),
+  
+  /** Sets immersive mode sensitivity multiplier */
+  setImmersiveSensitivity: (sensitivity) => set({ immersiveSensitivity: sensitivity }),
   
   /** Toggles debug loading mode */
   toggleDebugLoadingMode: () => set((state) => ({ 

@@ -7,13 +7,15 @@
 import { useStore } from '../store';
 import CameraControls from './CameraControls';
 import AnimationSettings from './AnimationSettings';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faChevronLeft } from '@fortawesome/free-solid-svg-icons';
 
 function SidePanel() {
   // Store state
   const status = useStore((state) => state.status);
   const fileInfo = useStore((state) => state.fileInfo);
   const isMobile = useStore((state) => state.isMobile);
-  
+  const panelOpen = useStore((state) => state.panelOpen); // assumes this exists
   // Store actions
   const togglePanel = useStore((state) => state.togglePanel);
 
@@ -21,17 +23,15 @@ function SidePanel() {
     <>
       {/* Panel toggle button */}
       <button
-        class="panel-toggle"
+        class={`panel-toggle${panelOpen ? ' open' : ''}`}
         aria-label="Toggle info panel"
         type="button"
         onClick={togglePanel}
       >
-        {'<'}
+        <FontAwesomeIcon icon={faChevronLeft} />
       </button>
-      
       {/* Side panel content */}
       <div class="side">
-        
         {/* File info display - hidden on mobile */}
         {!isMobile && (
           <div class="debug">
@@ -57,7 +57,6 @@ function SidePanel() {
             </div>
           </div>
         )}
-        
         {/* Settings panels */}
         <CameraControls />
         <AnimationSettings />

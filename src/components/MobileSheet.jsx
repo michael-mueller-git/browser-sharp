@@ -4,6 +4,7 @@
  */
 
 import { useRef, useCallback, useState } from 'preact/hooks';
+import useSwipe from '../utils/useSwipe';
 import { useStore } from '../store';
 import CameraControls from './CameraControls';
 import AnimationSettings from './AnimationSettings';
@@ -23,10 +24,7 @@ function MobileSheet() {
 
   // Refs
   const fileInputRef = useRef(null);
-  const touchStartRef = useRef(null);
-
-  // Local state
-  const [isDragging, setIsDragging] = useState(false);
+  const dragHandleRef = useRef(null);
 
   /**
    * Handle drag handle click to toggle
@@ -35,43 +33,16 @@ function MobileSheet() {
     togglePanel();
   }, [togglePanel]);
 
-  /**
-   * Handle touch start - record starting position
-   */
-  const handleTouchStart = useCallback((e) => {
-    const touch = e.touches[0];
-    touchStartRef.current = {
-      y: touch.clientY,
-      time: Date.now()
-    };
-    setIsDragging(true);
-  }, []);
-
-  /**
-   * Handle touch end - determine swipe direction and toggle
-   */
-  const handleTouchEnd = useCallback((e) => {
-    if (!touchStartRef.current) return;
-
-    const touch = e.changedTouches[0];
-    const deltaY = touch.clientY - touchStartRef.current.y;
-    const deltaTime = Date.now() - touchStartRef.current.time;
-    const velocity = Math.abs(deltaY) / deltaTime;
-
-    // Swipe up (negative deltaY) to open, swipe down (positive deltaY) to close
-    if (Math.abs(deltaY) > SWIPE_THRESHOLD || velocity > 0.5) {
-      if (deltaY < 0 && !panelOpen) {
-        // Swiped up - open
-        togglePanel();
-      } else if (deltaY > 0 && panelOpen) {
-        // Swiped down - close
-        togglePanel();
-      }
+  // useSwipe on the drag handle to detect vertical swipes
+  useSwipe(dragHandleRef, {
+    direction: 'vertical',
+    threshold: SWIPE_THRESHOLD,
+    allowCross: 50,
+    onSwipe: ({ dir }) => {
+      if (dir === 'up' && !panelOpen) togglePanel();
+      if (dir === 'down' && panelOpen) togglePanel();
     }
-
-    touchStartRef.current = null;
-    setIsDragging(false);
-  }, [panelOpen, togglePanel]);
+  });
 
   /**
    * Triggers file picker dialog.
@@ -94,12 +65,10 @@ function MobileSheet() {
   return (
     <div class={`mobile-sheet ${panelOpen ? 'open' : 'closed'}`}>
       {/* Drag handle with enlarged touch target - outside scroll container */}
-      <div class="drag-handle">
+      <div class="drag-handle" ref={dragHandleRef}>
         <div 
           class="drag-handle-touch-target"
           onClick={handleDragHandleClick}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
         />
         <div class="drag-handle-bar" />
       </div>

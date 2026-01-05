@@ -17,6 +17,23 @@ body {
   overflow: hidden;
 }
 
+/* Remove blue tap highlight on mobile/touch for buttons and interactive elements */
+button, a, input, .sidebar-btn, .panel-toggle {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* For touch devices, make focus rings less obtrusive while still present for keyboard users */
+@media (pointer: coarse) {
+  :focus {
+    outline: none;
+    box-shadow: none;
+  }
+  button:focus-visible, a:focus-visible {
+    outline: 2px solid rgba(110,231,255,0.18);
+    outline-offset: 2px;
+  }
+}
+
 #app {
   height: 100vh;
   height: 100dvh;
@@ -233,13 +250,13 @@ body {
   position: fixed;
   top: 24px;
   right: 24px;
-  width: 48px;
-  height: 48px;
+  width: 42px;
+  height: 42px;
   border-radius: 32px;
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: rgba(14, 18, 28, 0.8);
   color: #e6ecf8;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: 1px;
   cursor: pointer;
@@ -247,6 +264,9 @@ body {
   backdrop-filter: blur(14px);
   z-index: 30;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+   display: flex;
+   align-items: center;
+   justify-content: center;
 }
 
 .panel-toggle:hover {
@@ -257,6 +277,13 @@ body {
 .panel-toggle:active {
   transform: translateY(0);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.panel-toggle .svg-inline--fa {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.panel-toggle.open .svg-inline--fa {
+  transform: rotate(180deg);
 }
 
 .header {
@@ -1233,7 +1260,6 @@ select option {
 
 .mobile-sheet .drag-handle-touch-target {
   position: absolute;
-  /* background-color: red; */
   top: -20px;
   left: 60px;
   right: 60px;
@@ -1281,8 +1307,16 @@ select option {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 20px;
+  width: 60px;
   z-index: 9;
+}
+
+/* On mobile portrait, leave space for bottom sheet */
+@media (max-width: 768px) and (orientation: portrait) {
+  .asset-sidebar {
+    bottom: 45px;
+    border-radius: 0 12px 12px 0;
+  }
 }
 
 .sidebar-trigger-btn {
@@ -1308,10 +1342,29 @@ select option {
   right: 20px;
 }
 
-.sidebar-trigger-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.3);
-  color: #fff;
+.sidebar-trigger-btn.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-20px);
+}
+
+/* Apply hover styles only on devices that support hover (desktop, trackpads)
+   Prevents :hover from sticking on touchscreens after tap */
+@media (hover: hover) and (pointer: fine) {
+  .sidebar-trigger-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #fff;
+  }
+}
+
+/* On touch devices, mirror the hover appearance while the button is actively pressed */
+@media (hover: none) and (pointer: coarse) {
+  .sidebar-trigger-btn:active {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #fff;
+  }
 }
 
 .sidebar-trigger-btn.hidden {
@@ -1371,7 +1424,7 @@ select option {
 }
 
 .sidebar-footer {
-  padding: 12px;
+  padding: 10px 10px;
   text-align: center;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.5);
@@ -1389,6 +1442,33 @@ select option {
   }
 }
 
+/* Keep controls visible when the viewer element is fullscreen */
+@media screen and (max-width: 768px) {
+  #viewer:fullscreen .sidebar-trigger-btn,
+  #viewer:-webkit-full-screen .sidebar-trigger-btn {
+    bottom: 18px!important; /* base offset when viewer is fullscreen */
+    z-index: 9999;
+  }
+
+  #viewer:fullscreen .sidebar-trigger-btn.right,
+  #viewer:-webkit-full-screen .sidebar-trigger-btn.right {
+    right: 20px;
+  }
+
+  #viewer:fullscreen .sidebar-trigger-btn.left,
+  #viewer:-webkit-full-screen .sidebar-trigger-btn.left {
+    left: 20px;
+  }
+
+  /* When in fullscreen and in portrait (mobile), nudge buttons further down so they're reachable */
+  @media (orientation: portrait) {
+    #viewer:fullscreen .sidebar-trigger-btn,
+    #viewer:-webkit-full-screen .sidebar-trigger-btn {
+      bottom: 70px;
+    }
+  }
+}
+
 /* Sidebar Controls */
 .sidebar-controls {
   display: flex;
@@ -1398,9 +1478,9 @@ select option {
 }
 
 .sidebar-btn {
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
+  width: 36px;
+  height: 34px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.7);
@@ -1419,7 +1499,17 @@ select option {
   color: #fff;
   border-color: rgba(255, 255, 255, 0.3);
 }
+.sidebar-btn.add {
+  background: rgba(60, 120, 80, 0.12);
+  color: #65a37d;
+  border-color: rgba(143, 230, 176, 0.18);
+}
 
+.sidebar-btn.add:hover {
+    color: #76d199;
+
+  background: rgba(60, 111, 77, 0.236);
+}
 .sidebar-btn.delete:hover {
   background: rgba(255, 80, 80, 0.2);
   color: #ff6b6b;

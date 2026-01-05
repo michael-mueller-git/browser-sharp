@@ -20,9 +20,10 @@ import {
   THREE,
   SplatMesh,
 } from '../viewer';
-import { restoreHomeView } from '../cameraUtils';
+import { restoreHomeView, resetViewWithImmersive } from '../cameraUtils';
 import { cancelLoadZoomAnimation, startAnchorTransition } from '../cameraAnimations';
-import { recenterInImmersiveMode, isImmersiveModeActive } from '../immersiveMode';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faRotate, faRotateRight } from '@fortawesome/free-solid-svg-icons';
 import { loadNextAsset, loadPrevAsset, resize, initDragDrop, handleMultipleFiles } from '../fileLoader';
 import { getFormatAccept } from '../formats/index';
 
@@ -66,13 +67,19 @@ function Viewer({ viewerReady }) {
 
   // Track mesh state
   const [hasMesh, setHasMesh] = useState(false);
+  const hasMeshRef = useRef(false);
 
   /**
-   * Track mesh loading state
+   * Track mesh loading state - only update state when value changes
+   * to avoid unnecessary re-renders during animations
    */
   useEffect(() => {
     const checkMesh = () => {
-      setHasMesh(!!currentMesh);
+      const meshPresent = !!currentMesh;
+      if (meshPresent !== hasMeshRef.current) {
+        hasMeshRef.current = meshPresent;
+        setHasMesh(meshPresent);
+      }
     };
     
     // Check immediately and set up interval to poll
@@ -98,6 +105,13 @@ function Viewer({ viewerReady }) {
       await handleMultipleFiles(Array.from(files));
       event.target.value = '';
     }
+  }, []);
+
+  /**
+   * Handles reset view - uses shared function that handles immersive mode.
+   */
+  const handleResetView = useCallback(() => {
+    resetViewWithImmersive();
   }, []);
 
   /**
@@ -258,23 +272,6 @@ function Viewer({ viewerReady }) {
             </div>
           </div>
         )
-      )}
-      {/* Reset view button - mobile only, shown when mesh is loaded */}
-      {isMobile && hasMesh && (
-        <button 
-          class="sidebar-trigger-btn right" 
-          onClick={() => {
-            if (isImmersiveModeActive()) {
-              recenterInImmersiveMode(restoreHomeView, 600);
-            } else {
-              restoreHomeView();
-            }
-          }}
-          aria-label="Reset camera view"
-          title="Reset view (R)"
-        >
-          reset
-        </button>
       )}
     </div>
   );

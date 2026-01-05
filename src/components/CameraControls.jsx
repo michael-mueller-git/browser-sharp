@@ -6,11 +6,11 @@
 import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { useStore } from '../store';
 import { camera, controls, defaultCamera, defaultControls, dollyZoomBaseDistance, dollyZoomBaseFov, requestRender, THREE } from '../viewer';
-import { applyCameraRangeDegrees, restoreHomeView } from '../cameraUtils';
+import { applyCameraRangeDegrees, restoreHomeView, resetViewWithImmersive } from '../cameraUtils';
 import { currentMesh, raycaster, SplatMesh, scene } from '../viewer';
 import { updateDollyZoomBaselineFromCamera } from '../viewer';
 import { startAnchorTransition } from '../cameraAnimations';
-import { enableImmersiveMode, disableImmersiveMode, recenterInImmersiveMode, isImmersiveModeActive, pauseImmersiveMode, resumeImmersiveMode } from '../immersiveMode';
+import { enableImmersiveMode, disableImmersiveMode, recenterInImmersiveMode, isImmersiveModeActive, pauseImmersiveMode, resumeImmersiveMode, setImmersiveSensitivityMultiplier } from '../immersiveMode';
 import { saveFocusDistance, clearFocusDistance } from '../fileStorage';
 
 /** Default orbit range in degrees */
@@ -106,6 +106,8 @@ function CameraControls() {
   const isMobile = useStore((state) => state.isMobile);
   const immersiveMode = useStore((state) => state.immersiveMode);
   const setImmersiveMode = useStore((state) => state.setImmersiveMode);
+  const immersiveSensitivity = useStore((state) => state.immersiveSensitivity);
+  const setImmersiveSensitivity = useStore((state) => state.setImmersiveSensitivity);
   const currentFileName = useStore((state) => state.fileInfo?.name);
   const hasCustomFocus = useStore((state) => state.hasCustomFocus);
   const setHasCustomFocus = useStore((state) => state.setHasCustomFocus);
@@ -129,8 +131,8 @@ function CameraControls() {
 
   /**
    * Handles click during focus-setting mode.
-   * Raycasts to get hit distance, then moves the orbit target along the
-   * camera's forward direction to that distance, preserving pan/framing.
+   * Raycasts to get hit distance, then sets the orbit target along the
+   * camera's forward direction to that distance without moving the camera.
    */
   const handleFocusClick = useCallback((e) => {
     if (focusModeRef.current !== FOCUS_MODE.SETTING) return;
@@ -164,14 +166,24 @@ function CameraControls() {
     camera.getWorldDirection(cameraDirection);
     const newTarget = camera.position.clone().addScaledVector(cameraDirection, hitDistance);
 
-    // Animate to new target (depth only - preserves apparent framing)
-    startAnchorTransition(newTarget, {
-      duration: 400,
-      onComplete: () => {
-        updateDollyZoomBaselineFromCamera();
-        requestRender();
-      },
-    });
+    // Pause immersive mode briefly to prevent interference
+    const wasImmersive = isImmersiveModeActive();
+    if (wasImmersive) {
+      pauseImmersiveMode();
+    }
+
+    // Directly set the target without animating camera position
+    controls.target.copy(newTarget);
+    controls.update();
+    updateDollyZoomBaselineFromCamera();
+    requestRender();
+
+    // Resume immersive mode after a brief delay
+    if (wasImmersive) {
+      setTimeout(() => {
+        resumeImmersiveMode();
+      }, 100);
+    }
 
     addLog(`Focus depth set: ${hitDistance.toFixed(2)} units`);
 
@@ -434,16 +446,21 @@ function CameraControls() {
   }, [setImmersiveMode, addLog]);
 
   /**
-   * Resets immersive mode baseline on recenter.
-   * Pauses orientation input during animation to avoid conflicts.
+   * Handles immersive sensitivity slider changes.
+   */
+  const handleImmersiveSensitivityChange = useCallback((e) => {
+    const value = Number.parseFloat(e.target.value);
+    if (!Number.isFinite(value)) return;
+    setImmersiveSensitivity(value);
+    setImmersiveSensitivityMultiplier(value);
+  }, [setImmersiveSensitivity]);
+
+  /**
+   * Resets view with immersive mode support.
+   * Uses the shared function that pauses orientation input during animation.
    */
   const handleRecenterWithImmersive = useCallback(() => {
-    if (isImmersiveModeActive()) {
-      // Use special recenter that pauses orientation input
-      recenterInImmersiveMode(handleRecenter, 600);
-    } else {
-      handleRecenter();
-    }
+    resetViewWithImmersive();
   }, []);
 
   return (
@@ -465,17 +482,39 @@ function CameraControls() {
       >
         {/* Immersive mode toggle - mobile only */}
         {isMobile && (
-          <div class="control-row animate-toggle-row">
-            <span class="control-label">Immersive mode</span>
-            <label class="switch">
-              <input
-                type="checkbox"
-                checked={immersiveMode}
-                onChange={handleImmersiveToggle}
-              />
-              <span class="switch-track" aria-hidden="true" />
-            </label>
-          </div>
+          <>
+            <div class="control-row animate-toggle-row">
+              <span class="control-label">Immersive mode</span>
+              <label class="switch">
+                <input
+                  type="checkbox"
+                  checked={immersiveMode}
+                  onChange={handleImmersiveToggle}
+                />
+                <span class="switch-track" aria-hidden="true" />
+              </label>
+            </div>
+            
+            {/* Immersive sensitivity slider - shown when immersive mode is active */}
+            {immersiveMode && (
+              <div class="control-row">
+                <span class="control-label">Tilt sensitivity</span>
+                <div class="control-track">
+                  <input
+                    type="range"
+                    min="1.0"
+                    max="5.0"
+                    step="0.1"
+                    value={immersiveSensitivity}
+                    onInput={handleImmersiveSensitivityChange}
+                  />
+                  <span class="control-value">
+                    {immersiveSensitivity.toFixed(1)}×
+                  </span>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Orbit range control */}

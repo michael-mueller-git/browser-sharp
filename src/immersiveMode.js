@@ -19,10 +19,22 @@ let lastGamma = null;
 let screenOrientation = 'portrait-primary';
 
 // Sensitivity settings
-const SENSITIVITY = {
-  tilt: 0.006,      // How much camera moves per degree of device tilt (reduced)
+const BASE_SENSITIVITY = {
+  tilt: 0.006,      // Base tilt sensitivity
   maxAngle: 25,     // Maximum degrees of camera orbit from center
   smoothing: 0.08,  // Smoothing factor (0-1, lower = smoother)
+};
+
+// Current sensitivity (can be scaled by multiplier)
+let currentSensitivity = { ...BASE_SENSITIVITY };
+
+/**
+ * Sets the sensitivity multiplier for immersive mode tilt.
+ * @param {number} multiplier - Multiplier between 1.0 and 5.0
+ */
+export const setImmersiveSensitivityMultiplier = (multiplier) => {
+  const clamped = Math.max(1.0, Math.min(5.0, multiplier));
+  currentSensitivity.tilt = BASE_SENSITIVITY.tilt * clamped;
 };
 
 // Smoothed values
@@ -159,12 +171,12 @@ const handleDeviceOrientation = (event) => {
   };
   
   // Apply soft clamping for smooth boundary behavior
-  targetBeta = softClamp(deltaBeta, SENSITIVITY.maxAngle);
-  targetGamma = softClamp(deltaGamma, SENSITIVITY.maxAngle);
+  targetBeta = softClamp(deltaBeta, currentSensitivity.maxAngle);
+  targetGamma = softClamp(deltaGamma, currentSensitivity.maxAngle);
   
   // Apply smoothing (interpolate towards target)
-  smoothedBeta += (targetBeta - smoothedBeta) * SENSITIVITY.smoothing;
-  smoothedGamma += (targetGamma - smoothedGamma) * SENSITIVITY.smoothing;
+  smoothedBeta += (targetBeta - smoothedBeta) * currentSensitivity.smoothing;
+  smoothedGamma += (targetGamma - smoothedGamma) * currentSensitivity.smoothing;
   
   // Apply to camera orbit
   if (baseSpherical) {
@@ -174,8 +186,8 @@ const handleDeviceOrientation = (event) => {
     // Gamma (left-right tilt) -> azimuthal angle (horizontal orbit)
     // Beta (front-back tilt) -> polar angle (vertical orbit)
     // Note: negative beta = tilt phone forward = look down = increase phi
-    newSpherical.theta = baseSpherical.theta + smoothedGamma * SENSITIVITY.tilt;
-    newSpherical.phi = baseSpherical.phi + smoothedBeta * SENSITIVITY.tilt;
+    newSpherical.theta = baseSpherical.theta + smoothedGamma * currentSensitivity.tilt;
+    newSpherical.phi = baseSpherical.phi + smoothedBeta * currentSensitivity.tilt;
     
     // Clamp phi - use very generous absolute limits
     // The soft clamping on input already provides smooth boundaries

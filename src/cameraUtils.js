@@ -96,6 +96,36 @@ export const restoreHomeView = () => {
   });
 };
 
+// Lazy import to avoid circular dependency
+let immersiveModeModule = null;
+const getImmersiveModule = async () => {
+  if (!immersiveModeModule) {
+    immersiveModeModule = await import('./immersiveMode.js');
+  }
+  return immersiveModeModule;
+};
+
+/**
+ * Resets the camera view with immersive mode support.
+ * Pauses device orientation input during the reset animation when in immersive mode,
+ * then resumes with a fresh baseline. This prevents judder/stutter.
+ * 
+ * This is the canonical reset function - use this instead of restoreHomeView directly
+ * when immersive mode may be active.
+ */
+export const resetViewWithImmersive = async () => {
+  if (!camera || !controls) return;
+  
+  const immersive = await getImmersiveModule();
+  
+  if (immersive.isImmersiveModeActive()) {
+    // Use special recenter that pauses orientation input during animation
+    immersive.recenterInImmersiveMode(restoreHomeView, 600);
+  } else {
+    restoreHomeView();
+  }
+};
+
 export const fitViewToMesh = (mesh) => {
   if (!mesh.getBoundingBox) return;
   const box = mesh.getBoundingBox();

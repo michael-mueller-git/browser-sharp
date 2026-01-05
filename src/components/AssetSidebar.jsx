@@ -1,9 +1,12 @@
 import { useEffect, useState, useRef, useCallback } from 'preact/hooks';
+import useSwipe from '../utils/useSwipe';
 import { useStore } from '../store';
 import { loadAssetByIndex, handleAddFiles } from '../fileLoader';
 import { removeAsset, clearAssets, getAssetList, getCurrentAssetIndex } from '../assetManager';
 import { deleteFileSettings, clearAllFileSettings } from '../fileStorage';
 import { getFormatAccept } from '../formats/index';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faPlus, faTrash } from '@fortawesome/free-solid-svg-icons';
 
 function AssetSidebar() {
   const assets = useStore((state) => state.assets);
@@ -15,10 +18,11 @@ function AssetSidebar() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteScope, setDeleteScope] = useState('single'); // 'single' or 'all'
   const [clearMetadata, setClearMetadata] = useState(false);
-
-  const hideTimerRef = useRef(null);
   const sidebarRef = useRef(null);
   const fileInputRef = useRef(null);
+  const hoverTargetRef = useRef(null);
+  const openedByHoverRef = useRef(false);
+  const hideTimeoutRef = useRef(null);
 
   const formatAccept = getFormatAccept();
 
@@ -29,21 +33,10 @@ function AssetSidebar() {
     setIsVisible(false);
   }, []);
 
-  const startHideTimer = useCallback(() => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => {
-      hideSidebar();
-    }, 4000);
-  }, [hideSidebar]);
-
-  const clearHideTimer = useCallback(() => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-  }, []);
-
   const showSidebar = useCallback(() => {
     setIsVisible(true);
-    startHideTimer();
-  }, [startHideTimer]);
+    openedByHoverRef.current = true;
+  }, []);
 
   // Show on index change (navigation)
   useEffect(() => {
@@ -52,10 +45,17 @@ function AssetSidebar() {
     }
   }, [currentAssetIndex, hasMultipleAssets, showSidebar]);
 
-  // Clean up timer on unmount
+  // No hide timer: sidebar visibility is manual or based on navigation
+
+  // Cleanup hide timeout on unmount
   useEffect(() => {
-    return () => clearHideTimer();
-  }, [clearHideTimer]);
+    return () => {
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+        hideTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Click outside listener to close sidebar
   useEffect(() => {
@@ -75,6 +75,7 @@ function AssetSidebar() {
 
   const handleAddClick = () => {
     fileInputRef.current?.click();
+    openedByHoverRef.current = false; // opened by explicit click
   };
 
   const handleFileChange = async (event) => {
@@ -89,8 +90,25 @@ function AssetSidebar() {
     setDeleteScope('single');
     setClearMetadata(false);
     setShowDeleteModal(true);
-    clearHideTimer();
+    openedByHoverRef.current = false; // explicit action
   };
+
+  const clearHideTimeout = useCallback(() => {
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleHide = useCallback(() => {
+    clearHideTimeout();
+    hideTimeoutRef.current = setTimeout(() => {
+      if (openedByHoverRef.current) {
+        setIsVisible(false);
+      }
+      hideTimeoutRef.current = null;
+    }, 500);
+  }, [clearHideTimeout]);
 
   const syncAssets = () => {
     const newAssets = getAssetList();
@@ -121,10 +139,19 @@ function AssetSidebar() {
     
     syncAssets();
     setShowDeleteModal(false);
-    startHideTimer();
   };
 
   if (assets.length === 0) return null;
+
+  // Swipe-right gesture for mobile
+  useSwipe(hoverTargetRef, {
+    direction: 'horizontal',
+    threshold: 60,
+    allowCross: 80,
+    onSwipe: ({ dir }) => {
+      if (dir === 'right') showSidebar();
+    }
+  });
 
   return (
     <>
@@ -139,6 +166,7 @@ function AssetSidebar() {
 
       {/* Invisible hover target on left edge */}
       <div 
+        ref={hoverTargetRef}
         class="sidebar-hover-target"
         onMouseEnter={showSidebar}
       />
@@ -156,9 +184,8 @@ function AssetSidebar() {
       <div 
         ref={sidebarRef}
         class={`asset-sidebar ${isVisible ? 'visible' : ''}`}
-        onMouseEnter={clearHideTimer}
-        onMouseLeave={startHideTimer}
-        onMouseMove={clearHideTimer} // Keep open while moving mouse inside
+        onMouseEnter={clearHideTimeout}
+        onMouseLeave={scheduleHide}
       >
         <div class="asset-list-vertical">
           {assets.map((asset, index) => (
@@ -180,22 +207,20 @@ function AssetSidebar() {
         </div>
         <div class="sidebar-footer">
           <div class="sidebar-controls">
-            <button 
+    <button 
               class="sidebar-btn add" 
               onClick={handleAddClick}
               title="Add files"
             >
-              +
+              <FontAwesomeIcon icon={faPlus} />
             </button>
-            <div class="counter">
-              {currentAssetIndex + 1} / {assets.length}
-            </div>
+      
             <button 
               class="sidebar-btn delete" 
               onClick={handleDeleteClick}
               title="Delete asset"
             >
-              ×
+              <FontAwesomeIcon icon={faTrash} />
             </button>
           </div>
         </div>
@@ -243,10 +268,7 @@ function AssetSidebar() {
             </div>
 
             <div class="modal-actions">
-              <button onClick={() => {
-                setShowDeleteModal(false);
-                startHideTimer();
-              }}>Cancel</button>
+              <button onClick={() => setShowDeleteModal(false)}>Cancel</button>
               <button class="danger" onClick={confirmDelete}>Delete</button>
             </div>
           </div>
