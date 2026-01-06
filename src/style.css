@@ -820,6 +820,13 @@ button, a, input, .sidebar-btn, .panel-toggle {
   z-index: 92;
 }
 
+/* Make bottom page buttons transparent in fullscreen for unobtrusive UI */
+#viewer:fullscreen .bottom-page-btn,
+#viewer:-webkit-full-screen .bottom-page-btn {
+  background: transparent !important;
+  color: rgba(217, 222, 232, 0.66) !important;
+}
+
 #viewer:fullscreen .modal-overlay,
 #viewer:-webkit-full-screen .modal-overlay {
   position: fixed;
@@ -1153,16 +1160,12 @@ button, a, input, .sidebar-btn, .panel-toggle {
 }
 
 .group-toggle .chevron {
-  width: 10px;
-  height: 10px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(45deg);
+  margin-right: -5px;
   transition: transform 0.2s ease;
 }
 
 .group-toggle[aria-expanded='true'] .chevron {
-  transform: rotate(-135deg);
+  transform: rotate(-180deg);
 }
 
 .group-content {

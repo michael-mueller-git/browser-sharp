@@ -16,6 +16,8 @@ import { resize } from '../fileLoader';
 import { resetViewWithImmersive } from '../cameraUtils';
 import { setupFullscreenHandler } from '../fullscreenHandler';
 import useOutsideClick from '../utils/useOutsideClick';
+import useSwipe from '../utils/useSwipe';
+import { loadNextAsset, loadPrevAsset } from '../fileLoader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faRotateRight } from '@fortawesome/free-solid-svg-icons';
 import { faExpand, faCompress } from '@fortawesome/free-solid-svg-icons';
@@ -46,11 +48,12 @@ function App() {
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false);
   const controlsRef = useRef(null);
+  const bottomControlsRef = useRef(null);
 
   // Outside click handler to close side panel
   useOutsideClick(
     togglePanel,
-    ['.side', '.mobile-sheet', '.panel-toggle'],
+    ['.side', '.mobile-sheet', '.panel-toggle', '.bottom-page-btn', '.bottom-controls'],
     panelOpen
   );
 
@@ -88,6 +91,26 @@ function App() {
   const handleResetView = useCallback(() => {
     resetViewWithImmersive();
   }, []);
+
+  /**
+   * Handles swipe gestures on bottom controls for asset navigation.
+   */
+  const handleSwipe = useCallback(({ dir }) => {
+    if (assets.length <= 1) return;
+    
+    if (dir === 'left') {
+      loadNextAsset();
+    } else if (dir === 'right') {
+      loadPrevAsset();
+    }
+  }, [assets.length]);
+
+  // Setup swipe detection on bottom controls
+  useSwipe(bottomControlsRef, {
+    direction: 'horizontal',
+    threshold: 40,
+    onSwipe: handleSwipe,
+  });
 
   const handleToggleFullscreen = useCallback(async () => {
     // Use the viewer element itself for fullscreen so the canvas expands
@@ -151,7 +174,7 @@ function App() {
       </div>
       {isMobile && isPortrait ? <MobileSheet /> : <SidePanel />}
       {/* Bottom controls container: sidebar index (left), nav (center), fullscreen+reset (right) */}
-      <div class="bottom-controls">
+      <div class="bottom-controls" ref={bottomControlsRef}>
         {/* Left: Asset index button */}
         <div class="bottom-controls-left">
           {assets.length > 0 && (

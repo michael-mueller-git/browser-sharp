@@ -12,7 +12,8 @@ import { updateDollyZoomBaselineFromCamera } from '../viewer';
 import { startAnchorTransition } from '../cameraAnimations';
 import { enableImmersiveMode, disableImmersiveMode, recenterInImmersiveMode, isImmersiveModeActive, pauseImmersiveMode, resumeImmersiveMode, setImmersiveSensitivityMultiplier } from '../immersiveMode';
 import { saveFocusDistance, clearFocusDistance } from '../fileStorage';
-
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faChevronDown } from '@fortawesome/free-solid-svg-icons';
 /** Default orbit range in degrees */
 const DEFAULT_CAMERA_RANGE_DEGREES = 8;
 
@@ -482,7 +483,7 @@ function CameraControls() {
         onClick={toggleCameraSettingsExpanded}
       >
         <span class="settings-eyebrow">Camera Settings</span>
-        <span class="chevron" />
+        <FontAwesomeIcon icon={faChevronDown} className="chevron" />
       </button>
       
       {/* Settings content */}

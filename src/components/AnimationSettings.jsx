@@ -5,6 +5,8 @@
  */
 
 import { useCallback } from 'preact/hooks';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faChevronDown, faRotateRight } from '@fortawesome/free-solid-svg-icons';
 import { useStore } from '../store';
 import { setLoadAnimationEnabled, setLoadAnimationIntensity, setLoadAnimationDirection, startLoadZoomAnimation } from '../cameraAnimations';
 import { saveAnimationSettings, savePreviewImage } from '../fileStorage';
@@ -163,7 +165,7 @@ function AnimationSettings() {
         onClick={toggleAnimSettingsExpanded}
       >
         <span class="settings-eyebrow">Animation Settings</span>
-        <span class="chevron" />
+        <FontAwesomeIcon icon={faChevronDown} className="chevron" />
       </button>
       
       {/* Settings content */}
@@ -189,7 +191,7 @@ function AnimationSettings() {
               title="Replay animation"
               aria-label="Replay animation"
             >
-              ↻
+              <FontAwesomeIcon icon={faRotateRight} style={{fontSize: "12px"}} />
             </button>
           </div>
         </div>
