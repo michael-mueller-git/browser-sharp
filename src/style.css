@@ -212,6 +212,7 @@ button, a, input, .sidebar-btn, .panel-toggle {
 .drop-help .fine-print {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.5);
+  pointer-events: auto;
 }
 
 .drop-help .large-file-btn {
@@ -230,7 +231,7 @@ button, a, input, .sidebar-btn, .panel-toggle {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 20px 18px;
+  padding: .8em .5em;
   width: min(300px, calc(100vw - 48px));
   max-height: calc(100vh - 36px);
   max-height: calc(100dvh - 36px);
@@ -1185,6 +1186,7 @@ button, a, input, .sidebar-btn, .panel-toggle {
   justify-content: space-between;
   gap: 12px;
   width: 100%;
+  min-height: 38px;
   padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -1208,7 +1210,7 @@ button, a, input, .sidebar-btn, .panel-toggle {
 }
 
 .group-toggle .chevron {
-  margin-right: -5px;
+  margin-right: -8px;
   transition: transform 0.2s ease;
 }
 
@@ -1444,13 +1446,13 @@ select option {
 
 /* Bottom page buttons (shared styles, no positioning) */
 .bottom-page-btn {
-  width: 52px;
-  background: rgba(12, 16, 26, 0.6);
+  width: 58px;
+  background: rgba(12, 16, 26, 0.164);
   backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.8);
   padding: 6px 12px;
-  border-radius: 20px;
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -1627,6 +1629,16 @@ select option {
   color: #fff;
 }
 
+.modal-note {
+  font-size: 13px;
+  color: rgba(160, 174, 192, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
 .modal-options {
   display: flex;
   flex-direction: column;
@@ -1671,6 +1683,15 @@ select option {
   width: 16px;
   height: 16px;
   margin: 0;
+}
+
+.modal-subnote {
+  font-size: 14px;
+  color: rgba(138, 155, 184, 0.75);
+  font-style: italic;
+  margin-top: 8px;
+  margin-left: 26px;
+  line-height: 1.4;
 }
 
 .modal-actions {
@@ -1745,7 +1766,7 @@ select option {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 8px;
+  gap: 10px;
 }
 
 /* Mobile portrait: adjust for bottom sheet */
@@ -2106,11 +2127,233 @@ select option {
   cursor: not-allowed;
 }
 
+.secondary-button {
+  width: 100%;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #e6ecf8;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.secondary-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.link-button {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #a0aec0;
+  cursor: pointer;
+  transition: all 0.2s;
+  height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+.link-button:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Small subtle demo button inside the drop-help area */
+.subtle-demo-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  height: 28px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+  margin-left: 6px;
+  pointer-events: auto;
+}
+
+.drop-help .fine-print .link-button {
+  vertical-align: middle;
+}
+
+.form-section {
+  margin-top: 16px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.config-grid {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  animation: slide-down 0.2s ease-out;
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .form-note {
   margin-top: 16px;
   font-size: 12px;
   color: #718096;
   text-align: center;
+}
+
+.form-note a {
+  color: #57b8cb;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.form-note a:hover {
+  text-decoration: underline;
+}
+
+/* URL List Styles */
+.url-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: slide-in 0.2s ease-out;
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.url-input-wrapper {
+  flex: 1;
+  position: relative;
+}
+
+.url-input-wrapper input {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 14px;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.url-input-wrapper input:focus {
+  outline: none;
+  border-color: rgba(110, 231, 255, 0.5);
+  background: rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 3px rgba(110, 231, 255, 0.1);
+}
+
+.url-input-wrapper input::placeholder {
+  color: #4a5568;
+}
+
+.url-input-wrapper input.invalid {
+  border-color: rgba(255, 80, 80, 0.5);
+  background: rgba(255, 80, 80, 0.05);
+}
+
+.url-remove-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 80, 80, 0.1);
+  border: 1px solid rgba(255, 80, 80, 0.2);
+  border-radius: 6px;
+  color: #ff6b6b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+}
+
+.url-remove-btn:hover {
+  background: rgba(255, 80, 80, 0.2);
+  border-color: rgba(255, 80, 80, 0.4);
+  transform: scale(1.05);
+}
+
+.url-remove-btn:active {
+  transform: scale(0.95);
+}
+
+.add-url-btn {
+  width: 100%;
+  padding: 10px 16px;
+  background: rgba(110, 231, 255, 0.05);
+  border: 1px dashed rgba(110, 231, 255, 0.3);
+  border-radius: 6px;
+  color: #6ee7ff;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.add-url-btn:hover {
+  background: rgba(110, 231, 255, 0.1);
+  border-color: rgba(110, 231, 255, 0.5);
+  border-style: solid;
+}
+
+.add-url-btn:active {
+  transform: scale(0.98);
+}
+
+.save-collection-btn {
+  margin-top: 8px;
+  font-size: 16px;
+  padding: 14px 20px;
+  font-weight: 600;
+}
+
+.save-collection-btn span {
+  display: flex;
+  align-items: center;
 }
 
 .form-details {
@@ -2160,6 +2403,8 @@ select option {
 .add-source-btn {
   width: 28px;
   height: 28px;
+   margin-top: -8px;
+  margin-bottom: -8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2205,14 +2450,14 @@ select option {
 .sources-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .source-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: .3em;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
@@ -2252,18 +2497,6 @@ select option {
   color: #6ee7ff;
 }
 
-.source-icon {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(110, 231, 255, 0.1);
-  border-radius: 6px;
-  color: #6ee7ff;
-  font-size: 14px;
-}
-
 .source-info {
   flex: 1;
   min-width: 0;
@@ -2284,22 +2517,18 @@ select option {
   text-overflow: ellipsis;
 }
 
-.source-active-pill {
-  background: rgba(110, 231, 255, 0.16);
-  color: #c4f1f9;
-  border: 1px solid rgba(110, 231, 255, 0.32);
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
 .source-meta {
   font-size: 12px;
   color: #718096;
   display: flex;
-  gap: 8px;
+  gap: 6px;
+  align-items: center;
+}
+
+.source-type-icon {
+  font-size: 10px;
+  opacity: 0.8;
+  margin-bottom: -2px;
 }
 
 .source-type {
@@ -2311,7 +2540,9 @@ select option {
 }
 
 .source-status {
-  font-size: 14px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
 }
 
 .status-ok {
@@ -2330,7 +2561,6 @@ select option {
   width: 100%;
   display: flex;
   gap: 8px;
-  margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }

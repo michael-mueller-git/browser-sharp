@@ -102,7 +102,7 @@ function LocalFolderForm({ onConnect, onBack }) {
   return (
     <div class="storage-form">
       <button class="back-button" onClick={onBack}>
-        {'<- Back'}
+        {'Back'}
       </button>
 
       <h3>Create local collection</h3>
@@ -183,6 +183,21 @@ function UrlCollectionForm({ onConnect, onBack }) {
     setUrls((prev) => (prev.length === 1 ? [''] : prev.filter((_, i) => i !== index)));
   }, []);
 
+  const isValidUrl = useCallback((url) => {
+    if (!url.trim()) return false;
+    try {
+      const parsed = new URL(url.trim());
+      return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const allUrlsValid = useMemo(() => {
+    const nonEmpty = urls.filter(u => u.trim());
+    return nonEmpty.length > 0 && nonEmpty.every(u => isValidUrl(u));
+  }, [urls, isValidUrl]);
+
   const handleConnect = useCallback(async () => {
     const cleaned = urls.map((u) => u.trim()).filter(Boolean);
     if (cleaned.length === 0) {
@@ -232,7 +247,7 @@ function UrlCollectionForm({ onConnect, onBack }) {
   return (
     <div class="storage-form">
       <button class="back-button" onClick={onBack}>
-        {'<- Back'}
+        {'Back'}
       </button>
 
       <h3>Create URL collection</h3>
@@ -259,29 +274,37 @@ function UrlCollectionForm({ onConnect, onBack }) {
       <div class="form-field">
         <label>Asset URLs</label>
         <div class="url-list">
-          {urls.map((url, index) => (
-            <div class="url-row" key={`url-${index}`}>
-              <input
-                type="url"
-                placeholder="https://example.com/scene.sog"
-                value={url}
-                onInput={(e) => updateUrl(index, e.target.value)}
-              />
-              <button
-                class="icon-button"
-                onClick={() => removeRow(index)}
-                title="Remove URL"
-                type="button"
-              >
-                <FontAwesomeIcon icon={faTimes} />
-              </button>
-            </div>
-          ))}
+          {urls.map((url, index) => {
+            const isValid = isValidUrl(url);
+            const showInvalid = url.trim() && !isValid;
+            return (
+              <div class="url-row" key={`url-${index}`}>
+                <div class="url-input-wrapper">
+                  <input
+                    type="url"
+                    placeholder="https://example.com/scene.sog"
+                    value={url}
+                    onInput={(e) => updateUrl(index, e.target.value)}
+                    class={showInvalid ? 'invalid' : ''}
+                  />
+                </div>
+                <button
+                  class="url-remove-btn"
+                  onClick={() => removeRow(index)}
+                  title="Remove URL"
+                  type="button"
+                >
+                  <FontAwesomeIcon icon={faTimes} />
+                </button>
+              </div>
+            );
+          })}
         </div>
-        <button class="secondary-button" onClick={addRow} type="button">
-          <FontAwesomeIcon icon={faPlus} /> Add URL
+        <button class="add-url-btn" onClick={addRow} type="button">
+          <FontAwesomeIcon icon={faPlus} />
+          <span>Add another URL</span>
         </button>
-        <span class="field-hint">Provide direct links to .sog/.ply files. No uploads or deletes supported.</span>
+        <span class="field-hint">Provide direct links to .sog/.ply files. Invalid URLs show a red outline.</span>
       </div>
 
       {error && (
@@ -292,22 +315,25 @@ function UrlCollectionForm({ onConnect, onBack }) {
       )}
 
       <button
-        class="primary-button"
+        class="primary-button save-collection-btn"
         onClick={handleConnect}
-        disabled={status === 'connecting'}
+        disabled={status === 'connecting' || !allUrlsValid}
       >
         {status === 'connecting' ? (
           <>
             <FontAwesomeIcon icon={faSpinner} spin />
-            {' '}Saving...
+            <span>Saving collection...</span>
           </>
         ) : status === 'success' ? (
           <>
             <FontAwesomeIcon icon={faCheck} />
-            {' '}Connected!
+            <span>Connected!</span>
           </>
         ) : (
-          'Save URL collection'
+          <>
+            <FontAwesomeIcon icon={faCheck} />
+            <span>Save URL collection</span>
+          </>
         )}
       </button>
     </div>
@@ -425,7 +451,7 @@ function SupabaseForm({ onConnect, onBack }) {
   return (
     <div class="storage-form">
       <button class="back-button" onClick={onBack}>
-        {'<- Back'}
+        {'Back'}
       </button>
 
       <h3>Create Supabase collection</h3>
@@ -480,7 +506,7 @@ function SupabaseForm({ onConnect, onBack }) {
             <strong>Supabase settings</strong>
             <div class="field-hint">
               {supabaseConfigured
-                ? <>Using bucket <em>{bucket}</em> at <em>{supabaseUrl}</em></>
+                ? <>Using bucket <em>{bucket}</em></>
                 : 'Not configured yet.'}
             </div>
           </div>

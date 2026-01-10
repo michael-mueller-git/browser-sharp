@@ -24,7 +24,8 @@ import { restoreHomeView, resetViewWithImmersive } from '../cameraUtils';
 import { cancelLoadZoomAnimation, startAnchorTransition } from '../cameraAnimations';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faRotate, faRotateRight } from '@fortawesome/free-solid-svg-icons';
-import { loadNextAsset, loadPrevAsset, resize, initDragDrop, handleMultipleFiles } from '../fileLoader';
+import { loadNextAsset, loadPrevAsset, resize, initDragDrop, handleMultipleFiles, loadFromStorageSource } from '../fileLoader';
+import { getSource, createPublicUrlSource, registerSource, saveSource } from '../storage/index.js';
 import { getFormatAccept } from '../formats/index';
 
 /** Tags that should not trigger keyboard shortcuts */
@@ -95,6 +96,51 @@ function Viewer({ viewerReady }) {
   const handlePickFile = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
+
+  /**
+   * Load demo public URL collection (create it if missing) and open it
+   */
+  const handleLoadDemo = useCallback(async () => {
+    console.log('Loading demo URL collection...');
+    try {
+      let demo = getSource('demo-public-url');
+      if (!demo) {
+        // Fallback: create the demo source if it wasn't registered yet
+        const demoUrls = [
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/_DSF1672.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/_DSF1749.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/_DSF1891.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/_DSF2158.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/_DSF2784.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/_DSF2810-Pano.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/_DSF3354.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/_DSF7664.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/20221007203015_IMG_0329.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/APC_0678.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/IMG_9728.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/PXL_20230822_061301870.sog',
+          'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/PXL_20240307_200213904.sog',
+        ];
+        demo = createPublicUrlSource({ id: 'demo-public-url', name: 'Demo URL collection', assetPaths: demoUrls });
+        registerSource(demo);
+        try { await saveSource(demo.toJSON()); } catch (err) { console.warn('Failed to persist demo source:', err); }
+      }
+
+      // Ensure source is connected before loading
+      try {
+        await demo.connect?.();
+      } catch (err) {
+        console.warn('Demo connect failed (continuing):', err);
+      }
+
+      // Load the demo collection
+      await loadFromStorageSource(demo);
+
+    } catch (err) {
+      addLog('Failed to load demo: ' + (err?.message || err));
+      console.warn('Failed to load demo:', err);
+    }
+  }, [addLog]);
 
   /**
    * Handles file selection from file picker.
@@ -260,7 +306,8 @@ function Viewer({ viewerReady }) {
             <button class="primary large-file-btn" onClick={handlePickFile}>
               Choose Files
             </button>
-            <div class="fine-print">Select PLY/SOG files • Spark + THREE 3DGS</div>
+            <div class="fine-print">Select PLY/SOG files or <button class="link-button subtle-demo-btn" onClick={(e) => { e.preventDefault(); handleLoadDemo(); }}>load demo</button>
+</div>
           </div>
         )
       ) : (
@@ -268,7 +315,7 @@ function Viewer({ viewerReady }) {
           <div class="drop-help">
             <div class="eyebrow">Drag PLY/SOG files or folders here</div>
             <div class="fine-print">
-              Or <a href="#" onClick={(e) => { e.preventDefault(); handlePickFile(); }} style="color: inherit; text-decoration: underline; cursor: pointer; pointer-events: auto;">click here</a> to browse local files
+             <a href="#" onClick={(e) => { e.preventDefault(); handlePickFile(); }} style="color: inherit; text-decoration: underline; cursor: pointer; pointer-events: auto;">click here</a> to browse local files, or <button class="link-button subtle-demo-btn" onClick={(e) => { e.preventDefault(); handleLoadDemo(); }}>load demo</button>
             </div>
           </div>
         )

@@ -356,35 +356,6 @@ export const cancelSlideAnimation = () => {
  */
 export const slideOutAnimation = (direction, { duration = 1200, amount = 0.45, fadeDelay = 0.7, mode = 'horizontal' } = {}) => {
   return new Promise((resolve) => {
-    // For fade mode, only do CSS transition - no camera animation
-    if (mode === 'fade') {
-      cancelSlideAnimation();
-      
-      const viewerEl = document.getElementById('viewer');
-      if (bgImageContainer) {
-        bgImageContainer.classList.add('blur-out');
-      }
-      
-      const fadeTimeoutId = setTimeout(() => {
-        if (viewerEl) {
-          viewerEl.classList.add('slide-out');
-        }
-        if (bgImageContainer) {
-          bgImageContainer.classList.remove('active');
-        }
-      }, duration * fadeDelay);
-      
-      // Just wait for the fade duration, no camera movement
-      slideAnimationState = {
-        frameId: setTimeout(() => {
-          slideAnimationState = null;
-          resolve();
-        }, duration),
-        startTime: null,
-        fadeTimeoutId,
-      };
-      return;
-    }
     
     if (!camera || !controls) {
       resolve();
@@ -425,13 +396,19 @@ export const slideOutAnimation = (direction, { duration = 1200, amount = 0.45, f
     let endPosition, endTarget, orbitAxis, orbitAngle;
     
     if (mode === 'zoom') {
-      // Zoom mode: zoom into the scene (move camera closer to target)
+      // Zoom: move closer to target without orbit
       const zoomAmount = distance * 0.3; // Zoom in by 30% of distance
       const zoomOffset = forward.clone().multiplyScalar(zoomAmount);
       endPosition = startPosition.clone().add(zoomOffset);
       endTarget = startTarget.clone(); // Target stays the same
       orbitAxis = up;
       orbitAngle = 0; // No orbit rotation for zoom
+    } else if (mode === 'fade') {
+      // Fade: keep camera static (no pan/zoom)
+      endPosition = startPosition.clone();
+      endTarget = startTarget.clone();
+      orbitAxis = up;
+      orbitAngle = 0;
     } else if (mode === 'vertical') {
       // Vertical mode: pan up/down
       const panSign = direction === 'next' ? -1 : 1; // next = pan down, prev = pan up
@@ -518,42 +495,6 @@ export const slideInAnimation = (direction, { duration = 1000, amount = 0.45, mo
       bgImageContainer.classList.remove('blur-out');
     }
 
-    // For fade mode, use JS-driven opacity animation for reliability
-    if (mode === 'fade') {
-      if (viewerEl) {
-        // Remove CSS classes and use inline style for the fade
-        viewerEl.classList.remove('slide-out', 'slide-in');
-      }
-      
-      if (canvas) {
-        // Start at opacity 0
-        canvas.style.opacity = '0';
-        canvas.style.transition = `opacity ${duration}ms ease-in`;
-        
-        // Force reflow to ensure the opacity 0 is applied
-        void canvas.offsetHeight;
-        
-        // Trigger fade in
-        canvas.style.opacity = '1';
-      }
-      
-      // Wait for the fade-in to complete, then clean up
-      const timeoutId = setTimeout(() => {
-        slideAnimationState = null;
-        if (canvas) {
-          // Remove inline styles so CSS can take over again
-          canvas.style.opacity = '';
-          canvas.style.transition = '';
-        }
-        resolve();
-      }, duration + 50); // Small buffer for safety
-      
-      slideAnimationState = {
-        fadeTimeoutId: timeoutId,
-        startTime: null,
-      };
-      return;
-    }
     
     // For non-fade modes, remove slide-out synchronously before setting up camera
     if (viewerEl) {
@@ -578,15 +519,20 @@ export const slideInAnimation = (direction, { duration = 1000, amount = 0.45, mo
     const right = new THREE.Vector3().crossVectors(forward, up).normalize();
 
     let startPosition, startTarget, orbitAxis, startOrbitAngle;
-    
     if (mode === 'zoom') {
-      // Zoom mode: start zoomed out (further from target) and zoom in
+      // Zoom start: begin further out, then ease in
       const zoomAmount = distance * 0.25; // Start 25% further out
       const zoomOffset = forward.clone().multiplyScalar(-zoomAmount);
       startPosition = endPosition.clone().add(zoomOffset);
       startTarget = endTarget.clone(); // Target stays the same
       orbitAxis = up;
       startOrbitAngle = 0; // No orbit rotation for zoom
+    } else if (mode === 'fade') {
+      // Fade: keep camera static (no offset)
+      startPosition = endPosition.clone();
+      startTarget = endTarget.clone();
+      orbitAxis = up;
+      startOrbitAngle = 0;
     } else if (mode === 'vertical') {
       // Vertical mode: start offset vertically
       const panSign = direction === 'next' ? 1 : -1; // Opposite of slide-out

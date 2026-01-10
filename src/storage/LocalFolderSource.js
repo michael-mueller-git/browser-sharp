@@ -59,8 +59,32 @@ export class LocalFolderSource extends AssetSource {
   }
 
   /**
-   * Connect to the folder by validating the stored handle or prompting for selection.
-   * @param {boolean} [promptIfNeeded=true] - Whether to show picker if handle is invalid
+   * Validate that a handle is a proper FileSystemDirectoryHandle.
+   * Corrupt handles from IndexedDB after browser restart can crash Chrome.
+   * @param {any} handle
+   * @returns {boolean}
+   */
+  _isValidHandle(handle) {
+    try {
+      return (
+        handle &&
+        typeof handle === 'object' &&
+        handle.kind === 'directory' &&
+        typeof handle.name === 'string' &&
+        typeof handle.queryPermission === 'function' &&
+        typeof handle.requestPermission === 'function'
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Connect to the local folder.
+   * IMPORTANT: This method does NOT load handles from IndexedDB to avoid Chrome crashes.
+   * Only handles already in memory (from same session) are used here.
+   * Use requestPermission() to safely load and request permission on stored handles.
+   * @param {boolean} [promptIfNeeded=true] - If true and no handle exists, prompt user to select folder
    * @returns {Promise<{success: boolean, error?: string, needsPermission?: boolean}>}
    */
   async connect(promptIfNeeded = true) {
@@ -71,67 +95,40 @@ export class LocalFolderSource extends AssetSource {
       };
     }
 
-    try {
-      // Try to load persisted handle if we don't have one
-      if (!this._handle) {
-        try {
-          this._handle = await loadDirectoryHandle(this.id);
-        } catch (error) {
-          console.warn('Failed to load persisted directory handle:', error);
-          this._handle = null;
-        }
-      }
-
-      if (this._handle) {
-        // Verify permission on existing handle
-        try {
-          const permission = await this._handle.queryPermission({ mode: 'read' });
-          if (permission === 'granted') {
-            this._connected = true;
-            return { success: true };
-          }
-
-          // Only request permission if we're allowed to prompt (requires user gesture)
-          if (promptIfNeeded) {
-            const requested = await this._handle.requestPermission({ mode: 'read' });
-            if (requested === 'granted') {
-              this._connected = true;
-              return { success: true };
-            }
-          }
-
-          // Permission not granted - need user interaction
-          return { 
-            success: false, 
-            needsPermission: true,
-            error: 'Click "Grant Access" to reconnect to this folder.' 
-          };
-        } catch (error) {
-          // Handle might be stale or rejected
-          console.warn('Directory handle validation failed:', error);
-          this._handle = null;
-        }
-      }
-
-      // No valid handle - prompt for folder selection
-      if (promptIfNeeded) {
-        return this.selectFolder();
-      }
-
-      return { 
-        success: false, 
-        needsPermission: true,
-        error: 'No folder selected' 
-      };
-    } catch (error) {
-      console.warn('LocalFolderSource.connect failed:', error);
-      this._handle = null;
-      return {
-        success: false,
-        needsPermission: true,
-        error: error?.message || 'Failed to connect to local folder',
-      };
+    // If already connected with a valid handle, return success
+    if (this._connected && this._handle) {
+      return { success: true };
     }
+
+    // If we have a handle in memory (from this session), try to use it
+    if (this._handle) {
+      try {
+        // This is safe because the handle is from this browser session
+        const permission = await this._handle.queryPermission({ mode: 'read' });
+        if (permission === 'granted') {
+          this._connected = true;
+          return { success: true };
+        }
+        // Permission not granted, need user gesture
+        return { success: false, needsPermission: true };
+      } catch (err) {
+        console.warn('Handle permission check failed:', err);
+        // Handle is bad, clear it
+        this._handle = null;
+        return { success: false, needsPermission: true };
+      }
+    }
+
+    // No handle in memory - DO NOT try to load from IndexedDB here!
+    // That's the crash source. Just report needs permission.
+    // The handle will be loaded safely in requestPermission() during user gesture.
+    if (promptIfNeeded) {
+      // User initiated (e.g., creating new collection), safe to show picker
+      return this.selectFolder();
+    }
+
+    // For auto-connect attempts, just say we need permission
+    return { success: false, needsPermission: true };
   }
 
   /**
@@ -157,8 +154,7 @@ export class LocalFolderSource extends AssetSource {
       this.name = this._handle.name;
       this.config.name = this._handle.name;
 
-      // Persist handle and config
-      await saveDirectoryHandle(this.id, this._handle);
+      // Persist config (we no longer persist the handle to avoid Chrome crashes after restart)
       await saveSource(this.toJSON());
 
       this._connected = true;
@@ -173,23 +169,66 @@ export class LocalFolderSource extends AssetSource {
 
   /**
    * Request permission on the stored handle (after user gesture).
+   * This MUST be called from a user gesture handler (click, etc).
+   * This is the ONLY safe place to load handles from IndexedDB.
    * @returns {Promise<{success: boolean, error?: string}>}
    */
   async requestPermission() {
-    if (!this._handle) {
-      return this.selectFolder();
+    // If already connected, return success
+    if (this._connected && this._handle) {
+      return { success: true };
     }
 
-    try {
-      const permission = await this._handle.requestPermission({ mode: 'read' });
-      if (permission === 'granted') {
-        this._connected = true;
-        return { success: true };
+    // If we have a handle in memory, try to request permission
+    if (this._handle) {
+      try {
+        const permission = await this._handle.requestPermission({ mode: 'read' });
+        if (permission === 'granted') {
+          this._connected = true;
+          return { success: true };
+        }
+        return { success: false, needsPermission: true };
+      } catch (err) {
+        console.warn('Permission request failed on in-memory handle:', err);
+        this._handle = null;
       }
-      return { success: false, error: 'Permission denied' };
-    } catch (error) {
-      return { success: false, error: error.message };
     }
+
+    // Do NOT load handles from IndexedDB; they can be corrupt after browser restart and crash Chrome.
+    // Always prompt the user to pick the folder again.
+    this._handle = null;
+    return this.selectFolder();
+  }
+
+  /**
+   * Validate that a handle is a proper FileSystemDirectoryHandle.
+   * Note: Even valid-looking handles can crash Chrome if loaded from IndexedDB after restart.
+   * @param {any} handle
+   * @returns {boolean}
+   */
+  _isValidHandle(handle) {
+    try {
+      return (
+        handle &&
+        typeof handle === 'object' &&
+        handle.kind === 'directory' &&
+        typeof handle.name === 'string' &&
+        typeof handle.queryPermission === 'function' &&
+        typeof handle.requestPermission === 'function'
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if we have a potentially reconnectable stored handle.
+   * Does NOT load the handle - just checks if one exists in the config.
+   * @returns {boolean}
+   */
+  hasStoredHandle() {
+    // We have config data that suggests a handle was stored
+    return Boolean(this.config?.config?.path);
   }
 
   /**

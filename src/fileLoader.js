@@ -442,7 +442,12 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
   // For slide transitions, start slide-out and entry prep in parallel
   let preloadedEntry = null;
   if (slideDirection && currentMesh) {
-    const slideOutPromise = slideOutAnimation(slideDirection, { duration: 1200, amount: 0.5, fadeDelay: 0.625, mode: slideMode });
+    const isFadeMode = slideMode === 'fade';
+    const slideOpts = isFadeMode
+      ? { duration: 650, amount: 0.35, fadeDelay: 0.5, mode: slideMode }
+      : { duration: 1200, amount: 0.5, fadeDelay: 0.625, mode: slideMode };
+
+    const slideOutPromise = slideOutAnimation(slideDirection, slideOpts);
     const prepPromise = entryPromise.catch((err) => {
       console.warn('Failed to preload during slide-out:', err);
       return null;

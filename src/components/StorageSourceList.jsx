@@ -96,21 +96,49 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
 
   // Check connection status on mount
   useEffect(() => {
+    let cancelled = false;
+
     const checkStatus = async () => {
+      // For local folders, NEVER try to auto-connect after browser restart.
+      // Loading handles from IndexedDB can crash Chrome.
+      // Just show "needs permission" and let user click to reconnect.
+      if (source.type === 'local-folder') {
+        // Only check if we have an in-memory handle from this session
+        if (source.isConnected()) {
+          if (!cancelled) {
+            setStatus('connected');
+            setAssetCount(source.getAssets().length);
+          }
+        } else {
+          // Don't call connect() - that's safe now but still unnecessary.
+          // Just show needs-permission and let user click to reconnect.
+          if (!cancelled) {
+            setStatus('needs-permission');
+          }
+        }
+        return;
+      }
+
+      // For other source types (Supabase, URL), use normal flow
       try {
         if (source.isConnected()) {
-          setStatus('connected');
-          setAssetCount(source.getAssets().length);
+          if (!cancelled) {
+            setStatus('connected');
+            setAssetCount(source.getAssets().length);
+          }
           return;
         }
 
-        // Try to connect without prompting (checks if permission is still granted)
         const result = await source.connect(false);
+        if (cancelled) return;
+
         if (result.success) {
           setStatus('connected');
           try {
             const assets = await source.listAssets();
-            setAssetCount(assets.length);
+            if (!cancelled) {
+              setAssetCount(assets.length);
+            }
           } catch (e) {
             console.warn('Failed to list assets:', e);
           }
@@ -118,14 +146,22 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
           setStatus('needs-permission');
         } else {
           setStatus('disconnected');
-        }
+        } 
       } catch (err) {
         console.warn('Source status check failed:', err);
-        setStatus('needs-permission');
+        if (!cancelled) {
+          setStatus('needs-permission');
+        }
       }
     };
 
-    checkStatus();
+    // Small delay to let component mount properly
+    const timeoutId = setTimeout(checkStatus, 50);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
   }, [source]);
 
   const handleReconnect = useCallback(async (e) => {
@@ -134,16 +170,35 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
     setStatus('connecting');
 
     try {
-      const result = await source.connect(false);
-      if (result.success) {
-        setStatus('connected');
-        const assets = await source.listAssets();
-        setAssetCount(assets.length);
-        await touchSource(source.id);
-      } else if (result.needsPermission) {
-        setStatus('needs-permission');
+      // For local folders, reconnect should request permission since this is a user gesture
+      if (source.type === 'local-folder' && typeof source.requestPermission === 'function') {
+        const result = await source.requestPermission();
+        if (result.success) {
+          setStatus('connected');
+          const assets = await source.listAssets();
+          setAssetCount(assets.length);
+          await touchSource(source.id);
+        } else if (result.needsPermission) {
+          setStatus('needs-permission');
+        } else {
+          setStatus('error');
+          if (result?.error) {
+            alert(result.error);
+          }
+        }
       } else {
-        setStatus('error');
+        // For other source types, use regular connect
+        const result = await source.connect(false);
+        if (result.success) {
+          setStatus('connected');
+          const assets = await source.listAssets();
+          setAssetCount(assets.length);
+          await touchSource(source.id);
+        } else if (result.needsPermission) {
+          setStatus('needs-permission');
+        } else {
+          setStatus('error');
+        }
       }
     } catch (err) {
       console.error('Reconnect failed:', err);
@@ -310,16 +365,12 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
         <FontAwesomeIcon icon={expanded ? faChevronDown : faChevronRight} />
       </button>
 
-      <div class="source-icon">
-        <FontAwesomeIcon icon={TYPE_ICONS[source.type] || faFolder} />
-      </div>
-
       <div class="source-info">
         <div class="source-name">
           <span class="source-name-text">{source.name}</span>
-          {isActive && <span class="source-active-pill">In use</span>}
         </div>
         <div class="source-meta">
+          <FontAwesomeIcon icon={TYPE_ICONS[source.type] || faFolder} className="source-type-icon" />
           <span class="source-type">{TYPE_LABELS[source.type]}</span>
           {isConnected && assetCount > 0 && (
             <span class="source-count">{assetCount}</span>
@@ -331,11 +382,11 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
         {isLoading ? (
           <FontAwesomeIcon icon={faSpinner} spin />
         ) : isConnected ? (
-          <FontAwesomeIcon icon={faCheck} class="status-ok" />
+          <></>
         ) : needsPermission ? (
-          <FontAwesomeIcon icon={faUnlock} class="status-warning" />
+          <FontAwesomeIcon icon={faUnlock} className="status-warning" />
         ) : (
-          <FontAwesomeIcon icon={faExclamationTriangle} class="status-error" />
+          <FontAwesomeIcon icon={faExclamationTriangle} className="status-error" />
         )}
       </div>
 
@@ -442,12 +493,12 @@ function StorageSourceList({ onAddSource, onSelectSource }) {
         onClick={() => setIsListExpanded(!isListExpanded)}
       >
         <span class="settings-eyebrow">Collections</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginRight: '-8px' }}>
           <button 
             class="add-source-btn" 
             onClick={(e) => { e.stopPropagation(); onAddSource(); }} 
             title="Add storage source"
-            style={{ width: '24px', height: '24px', fontSize: '11px' }}
+            style={{ width: '28px', height: '22px', fontSize: '11px' }}
           >
             <FontAwesomeIcon icon={faPlus} />
           </button>
