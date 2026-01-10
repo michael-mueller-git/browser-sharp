@@ -12,3 +12,10 @@ https://github.com/user-attachments/assets/b66ec760-4550-4724-9956-3330863820f0
 - Connect with project URL, anon key, bucket name, collection id.
 - Uploads/rescans are explicit; `manifest.json` stays the source of truth for cross-device loading.
 
+## Usage
+
+```
+nix run
+```
+
+Then open `http://127.0.0.1:4173`
