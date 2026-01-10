@@ -99,6 +99,7 @@ export const initViewer = (viewerEl) => {
   viewerEl.appendChild(renderer.domElement);
 
   // Camera
+  let unusedCamera = new THREE.PerspectiveCamera(60, 1, 0.01, 500);
   camera = new THREE.PerspectiveCamera(60, 1, 0.01, 500);
   camera.position.set(0.5, 0.5, 2.5);
   defaultCamera = {
@@ -114,7 +115,7 @@ export const initViewer = (viewerEl) => {
   outputPass = new OutputPass();
 
   // Controls
-  controls = new OrbitControls(camera, renderer.domElement);
+  controls = new OrbitControls(unusedCamera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.rotateSpeed = 0.75;
@@ -134,6 +135,7 @@ export const initViewer = (viewerEl) => {
     maxAzimuthAngle: controls.maxAzimuthAngle,
     enablePan: controls.enablePan,
   };
+
 
   // Spark renderer
   spark = new SparkRenderer({ renderer });
@@ -187,6 +189,93 @@ export const initViewer = (viewerEl) => {
   return { renderer, camera, controls, composer, spark };
 };
 
+let moveSpeed = 2.0; // Units per second
+let velocity = new THREE.Vector3();
+const dolly = new THREE.Group();
+
+
+function handleControllerInput() {
+  let idx = 0;
+  const session = renderer.xr.getSession();
+  if (session) {  //only if we are in a webXR session
+      for (const sourceXR of session.inputSources) {
+
+          const gamepad = sourceXR.gamepad;
+          if (!gamepad) continue;
+          idx += 1;
+       
+      /*
+        if (Math.hypot(stickX, stickY) > 0.15) {  // Deadzone
+          const direction = new THREE.Vector3(stickX, 0, -stickY);
+          direction.applyQuaternion(camera.quaternion);
+          direction.multiplyScalar(moveSpeed * 0.016);
+          dolly.position.add(direction);
+        }
+        */
+      
+          if (gamepad.axes[3] > 0.5) {
+                if (idx == 1) {
+                  dolly.position.y += 0.01;
+                } else {
+                  dolly.position.z -= 0.01;
+                }
+          }
+
+          if (gamepad.axes[3] < -0.5) {
+                if (idx == 1) {
+                  dolly.position.y -= 0.01;
+                } else {
+                  dolly.position.z += 0.01;
+                }
+          }
+
+          if (gamepad.axes[2] > 0.5) {
+                dolly.position.x -= 0.01;
+          }
+
+          if (gamepad.axes[2] < -0.5) {
+                dolly.position.x += 0.01;
+          }
+
+          
+    }            
+  }
+}
+
+export const startRenderLoop = () => {
+let controls2 = new OrbitControls(camera, renderer.domElement);
+  dolly.position.set(0.0, -1.6, 0.0); // Eye height
+  scene.add(dolly);
+  dolly.add(camera);
+  renderer.xr.enabled = true;
+  //the following increases the resolution on Quest slower
+  //renderer.xr.setFramebufferScaleFactor(2.0);
+
+  const controller1 = renderer.xr.getController(0);
+  const controller2 = renderer.xr.getController(1);
+
+	dolly.add(controller1);
+	dolly.add(controller2);
+  //controller1.add(new THREE.AxesHelper(0.1)); // Debug: see controllers
+  //controller2.add(new THREE.AxesHelper(0.1));
+  scene.add(controller1, controller2);
+  controls.enabled = false;
+  const animate = () => {
+    if (document.hidden || !renderer || !composer || !camera) {
+      return;
+    }
+    
+    // may use if (enderer.xr.isPresenting)
+    handleControllerInput();
+    //controls2.update();
+    
+    renderer.render(scene, camera);
+  };
+  
+  renderer.setAnimationLoop(animate);
+};
+
+/*
 export const startRenderLoop = () => {
   // Simple FPS measurement
   let lastTime = performance.now();
@@ -240,6 +329,7 @@ export const startRenderLoop = () => {
   };
   animate();
 };
+*/
 
 export const removeCurrentMesh = () => {
   if (currentMesh) {
@@ -259,6 +349,7 @@ const cancelPendingBgActivation = () => {
 export const updateBackgroundImage = (url) => {
   if (!bgImageContainer) return;
   cancelPendingBgActivation();
+  url=null;
 
   if (url) {
     const viewerEl = bgImageContainer.parentElement;

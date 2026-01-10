@@ -27,6 +27,9 @@ import { faRotate, faRotateRight } from '@fortawesome/free-solid-svg-icons';
 import { loadNextAsset, loadPrevAsset, resize, initDragDrop, handleMultipleFiles, loadFromStorageSource } from '../fileLoader';
 import { getSource, createPublicUrlSource, registerSource, saveSource } from '../storage/index.js';
 import { getFormatAccept } from '../formats/index';
+import { ARButton } from 'three/addons/webxr/ARButton.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { XRButton } from 'three/addons/webxr/XRButton.js';
 
 /** Tags that should not trigger keyboard shortcuts */
 const INPUT_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON']);
@@ -284,6 +287,10 @@ function Viewer({ viewerReady }) {
       document.removeEventListener('keydown', handleKeydown);
     };
   }, [viewerReady, addLog, togglePanel]);
+
+  // document.body.appendChild( ARButton.createButton( renderer ) );
+  // document.body.appendChild( VRButton.createButton( renderer ) );
+  document.body.appendChild( XRButton.createButton( renderer ) );
 
   return (
     <div id="viewer" class={`viewer ${debugLoadingMode ? 'loading' : ''}`} ref={viewerRef}>
