@@ -56,6 +56,7 @@ export const useStore = create((set, get) => ({
 
   // Custom focus state
   hasCustomFocus: false,
+  focusDistanceOverride: null,
   // Show FPS counter overlay
   showFps: false,
 
@@ -135,6 +136,7 @@ export const useStore = create((set, get) => ({
 
   /** Sets custom focus state */
   setHasCustomFocus: (hasCustomFocus) => set({ hasCustomFocus }),
+  setFocusDistanceOverride: (focusDistanceOverride) => set({ focusDistanceOverride }),
   
   /** Updates file info (merges with existing) */
   setFileInfo: (info) => set((state) => ({ 

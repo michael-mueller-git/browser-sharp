@@ -166,6 +166,27 @@ export const ensureSplatEntry = async (asset) => {
   return promise;
 };
 
+export const updateFocusDistanceInCache = (assetId, focusDistance) => {
+  if (!assetId || !cache.has(assetId)) return;
+  const entry = cache.get(assetId);
+  if (!entry) return;
+  if (!entry.storedSettings) {
+    entry.storedSettings = {};
+  }
+  entry.storedSettings.focusDistance = focusDistance;
+  entry.focusDistanceOverride = focusDistance;
+};
+
+export const clearFocusDistanceInCache = (assetId) => {
+  if (!assetId || !cache.has(assetId)) return;
+  const entry = cache.get(assetId);
+  if (!entry) return;
+  if (entry.storedSettings && entry.storedSettings.focusDistance !== undefined) {
+    delete entry.storedSettings.focusDistance;
+  }
+  entry.focusDistanceOverride = undefined;
+};
+
 export const activateSplatEntry = async (asset) => {
   const entry = await ensureSplatEntry(asset);
   if (!entry) return null;

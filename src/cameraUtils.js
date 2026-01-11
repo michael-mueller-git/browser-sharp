@@ -25,6 +25,8 @@ const getStoreState = () => useStore.getState();
 // Helper to format vec3
 const formatVec3 = (vec) => `${vec.x.toFixed(2)}, ${vec.y.toFixed(2)}, ${vec.z.toFixed(2)}`;
 
+const focusDirection = new THREE.Vector3();
+
 // Home view state
 let homeView = null;
 
@@ -128,6 +130,16 @@ export const restoreHomeView = () => {
       if (resize) resize();
     },
   });
+};
+
+export const applyFocusDistanceOverride = (distance) => {
+  if (distance === undefined || distance === null) return;
+  if (!camera || !controls) return;
+  camera.getWorldDirection(focusDirection);
+  const target = camera.position.clone().addScaledVector(focusDirection, distance);
+  controls.target.copy(target);
+  controls.update();
+  requestRender();
 };
 
 // Camera pose helpers -------------------------------------------------------
