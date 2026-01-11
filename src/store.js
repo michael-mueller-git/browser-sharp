@@ -33,6 +33,9 @@ export const useStore = create((set, get) => ({
   cameraRange: 8,
   dollyZoomEnabled: true,
   stereoEnabled: false,
+  vrSupported: false,
+  vrSessionActive: false,
+  vrModelScale: 1,
 
   // Animation settings
   animationEnabled: true,
@@ -53,6 +56,7 @@ export const useStore = create((set, get) => ({
 
   // Custom focus state
   hasCustomFocus: false,
+  focusDistanceOverride: null,
   // Show FPS counter overlay
   showFps: false,
 
@@ -103,6 +107,15 @@ export const useStore = create((set, get) => ({
 
   /** Enables/disables side-by-side stereo rendering */
   setStereoEnabled: (enabled) => set({ stereoEnabled: enabled }),
+
+  /** Marks whether WebXR/VR is available */
+  setVrSupported: (vrSupported) => set({ vrSupported }),
+
+  /** Tracks if a VR session is active */
+  setVrSessionActive: (vrSessionActive) => set({ vrSessionActive }),
+
+  /** Tracks model scale while in VR */
+  setVrModelScale: (vrModelScale) => set({ vrModelScale }),
   
   /** Enables/disables load animation */
   setAnimationEnabled: (enabled) => set({ animationEnabled: enabled }),
@@ -123,6 +136,7 @@ export const useStore = create((set, get) => ({
 
   /** Sets custom focus state */
   setHasCustomFocus: (hasCustomFocus) => set({ hasCustomFocus }),
+  setFocusDistanceOverride: (focusDistanceOverride) => set({ focusDistanceOverride }),
   
   /** Updates file info (merges with existing) */
   setFileInfo: (info) => set((state) => ({ 

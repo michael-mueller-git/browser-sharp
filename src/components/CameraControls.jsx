@@ -12,11 +12,16 @@ import { updateDollyZoomBaselineFromCamera } from '../viewer';
 import { startAnchorTransition } from '../cameraAnimations';
 import { enableImmersiveMode, disableImmersiveMode, recenterInImmersiveMode, isImmersiveModeActive, pauseImmersiveMode, resumeImmersiveMode, setImmersiveSensitivityMultiplier } from '../immersiveMode';
 import { saveFocusDistance, clearFocusDistance } from '../fileStorage';
+import { updateFocusDistanceInCache, clearFocusDistanceInCache } from '../splatManager';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronDown } from '@fortawesome/free-solid-svg-icons';
-import { resize } from '../fileLoader';
+import { resize, loadSplatFile } from '../fileLoader';
+import { enterVrSession } from '../vrMode';
 /** Default orbit range in degrees */
 const DEFAULT_CAMERA_RANGE_DEGREES = 8;
+const MIN_IMMERSIVE_RANGE_DEGREES = 15;
+const MAX_IMMERSIVE_RANGE_DEGREES = 90;
+const IMMERSIVE_RANGE_PER_SENSITIVITY = 18.75; // extra degrees per +1 sensitivity (hits 90° at max sens)
 
 /** Focus mode states */
 const FOCUS_MODE = {
@@ -83,6 +88,16 @@ const degreesToSliderValue = (degrees) => {
  */
 const formatDegrees = (degrees) => (degrees < 10 ? degrees.toFixed(1) : degrees.toFixed(0));
 
+const computeImmersiveRangeFloor = (sensitivity) => {
+  const extra = Math.max(0, sensitivity - 1) * IMMERSIVE_RANGE_PER_SENSITIVITY;
+  return Math.min(MAX_IMMERSIVE_RANGE_DEGREES, MIN_IMMERSIVE_RANGE_DEGREES + extra);
+};
+
+const enforceImmersiveRange = (rangeDeg, sensitivity) => {
+  const floor = computeImmersiveRangeFloor(sensitivity);
+  return Math.max(rangeDeg, floor);
+};
+
 /**
  * Updates orbit controls speed based on current FOV.
  * Slower controls at narrower FOV for precision, faster at wider FOV.
@@ -111,12 +126,16 @@ function CameraControls() {
   const immersiveSensitivity = useStore((state) => state.immersiveSensitivity);
   const setImmersiveSensitivity = useStore((state) => state.setImmersiveSensitivity);
   const currentFileName = useStore((state) => state.fileInfo?.name);
+  const assets = useStore((state) => state.assets);
+  const currentAssetIndex = useStore((state) => state.currentAssetIndex);
   const hasCustomFocus = useStore((state) => state.hasCustomFocus);
   const setHasCustomFocus = useStore((state) => state.setHasCustomFocus);
   const showFps = useStore((state) => state.showFps);
   const setShowFps = useStore((state) => state.setShowFps);
   const stereoEnabled = useStore((state) => state.stereoEnabled);
   const setStereoEnabled = useStore((state) => state.setStereoEnabled);
+  const vrSupported = useStore((state) => state.vrSupported);
+  const vrSessionActive = useStore((state) => state.vrSessionActive);
 
   // Ref for camera range slider to avoid DOM queries
   const rangeSliderRef = useRef(null);
@@ -198,6 +217,10 @@ function CameraControls() {
       saveFocusDistance(currentFileName, hitDistance).catch(err => {
         console.warn('Failed to save focus distance:', err);
       });
+      const asset = assets[currentAssetIndex];
+      if (asset?.id) {
+        updateFocusDistanceInCache(asset.id, hitDistance);
+      }
       setHasCustomFocus(true);
     }
     
@@ -206,7 +229,7 @@ function CameraControls() {
     setTimeout(() => {
       setFocusMode(hasCustomFocus ? FOCUS_MODE.CUSTOM : FOCUS_MODE.IDLE);
     }, 1500);
-  }, [addLog, currentFileName, hasCustomFocus]);
+  }, [addLog, currentFileName, hasCustomFocus, assets, currentAssetIndex]);
 
   /**
    * Activates focus-setting mode.
@@ -239,12 +262,20 @@ function CameraControls() {
     if (currentFileName && currentFileName !== '-') {
       const success = await clearFocusDistance(currentFileName);
       if (success) {
+        const asset = assets[currentAssetIndex];
+        if (asset?.id) {
+          clearFocusDistanceInCache(asset.id);
+          // Reload the current asset to immediately restore default focus
+          loadSplatFile(asset, { slideDirection: null }).catch(err => {
+            console.warn('Failed to reload asset after clearing focus:', err);
+          });
+        }
         setHasCustomFocus(false);
         setFocusMode(FOCUS_MODE.IDLE);
-        addLog('Custom focus cleared, reload to apply default');
+        addLog('Custom focus cleared');
       }
     }
-  }, [currentFileName, addLog]);
+  }, [currentFileName, addLog, assets, currentAssetIndex]);
 
   // Set up click listener and cursor when in focus-setting mode
   useEffect(() => {
@@ -343,8 +374,11 @@ function CameraControls() {
     }
 
     const degrees = sliderValueToDegrees(val);
-    setCameraRange(degrees);
-    applyCameraRangeDegrees(degrees);
+    const enforcedDegrees = isImmersiveModeActive()
+      ? enforceImmersiveRange(degrees, immersiveSensitivity)
+      : degrees;
+    setCameraRange(enforcedDegrees);
+    applyCameraRangeDegrees(enforcedDegrees);
   };
 
   /**
@@ -439,6 +473,12 @@ function CameraControls() {
       const success = await enableImmersiveMode();
       if (success) {
         setImmersiveMode(true);
+        // Ensure a comfortable orbit floor when tilt control is active
+        const boostedRange = enforceImmersiveRange(cameraRange, immersiveSensitivity);
+        if (boostedRange !== cameraRange) {
+          setCameraRange(boostedRange);
+          applyCameraRangeDegrees(boostedRange);
+        }
         addLog('Immersive mode enabled - tilt device to orbit');
       } else {
         e.target.checked = false;
@@ -449,7 +489,7 @@ function CameraControls() {
       setImmersiveMode(false);
       addLog('Immersive mode disabled');
     }
-  }, [setImmersiveMode, addLog]);
+  }, [setImmersiveMode, addLog, cameraRange, immersiveSensitivity, setCameraRange]);
 
   /**
    * Handles immersive sensitivity slider changes.
@@ -459,7 +499,14 @@ function CameraControls() {
     if (!Number.isFinite(value)) return;
     setImmersiveSensitivity(value);
     setImmersiveSensitivityMultiplier(value);
-  }, [setImmersiveSensitivity]);
+    if (isImmersiveModeActive()) {
+      const boostedRange = enforceImmersiveRange(cameraRange, value);
+      if (boostedRange !== cameraRange) {
+        setCameraRange(boostedRange);
+        applyCameraRangeDegrees(boostedRange);
+      }
+    }
+  }, [setImmersiveSensitivity, cameraRange, setCameraRange]);
 
   /** Toggle FPS overlay */
   const handleFpsToggle = useCallback((e) => {

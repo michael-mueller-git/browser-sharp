@@ -30,6 +30,7 @@ import {
   applyMetadataCamera,
   clearMetadataCamera,
   saveHomeView,
+  applyFocusDistanceOverride,
   applyCameraProjection,
   animateCameraMutation,
 } from "./cameraUtils.js";
@@ -105,8 +106,6 @@ const getStoreState = () => useStore.getState();
 /** Supported file extensions for display */
 const supportedExtensions = getSupportedExtensions();
 const supportedExtensionsText = supportedExtensions.join(", ");
-
-const focusDirection = new THREE.Vector3();
 
 const isFile = (value) => typeof File !== "undefined" && value instanceof File;
 
@@ -206,15 +205,6 @@ const waitForViewerResizeTransition = () => new Promise((resolve) => {
   timeoutId = setTimeout(done, 280); // Fallback in case transitionend doesn't fire
   viewerEl.addEventListener('transitionend', onEnd);
 });
-
-const applyFocusDistanceOverride = (distance) => {
-  if (distance === undefined || distance === null) return;
-  if (!camera || !controls) return;
-  camera.getWorldDirection(focusDirection);
-  const target = camera.position.clone().addScaledVector(focusDirection, distance);
-  controls.target.copy(target);
-  controls.update();
-};
 
 const syncStoredAnimationSettings = async (animationSettings, wasImmersiveModeActive, store) => {
   if (!animationSettings) return;
@@ -437,24 +427,30 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
 
   const store = getStoreState();
   const { slideDirection } = options;
-  const slideMode = store.slideMode ?? 'horizontal';
+  const immersiveActive = isImmersiveModeActive();
+  const forceFadeForNonSequential = !slideDirection; // random asset clicks should use fade transition
+  const slideMode = (immersiveActive || forceFadeForNonSequential)
+    ? 'fade'
+    : (store.slideMode ?? 'horizontal');
   const wasAlreadyCached = isSplatCached(asset);
 
   // Preload entry early (reused later to avoid duplicate loads)
   const entryPromise = ensureSplatEntry(asset);
   let aspectApplied = false;
   
-  // For slide transitions, start slide-out and entry prep in parallel
+  // For transitions (slides or random asset clicks), start fade/slide-out and entry prep in parallel
+  const transitionDirection = slideDirection ?? 'next';
+  const shouldRunTransition = currentMesh && (slideDirection || forceFadeForNonSequential);
   let preloadedEntry = null;
-  if (slideDirection && currentMesh) {
+  if (shouldRunTransition) {
     const isFadeMode = slideMode === 'fade';
     const slideOpts = isFadeMode
       ? { duration: 650, amount: 0.35, fadeDelay: 0.5, mode: slideMode }
       : { duration: 1200, amount: 0.5, fadeDelay: 0.625, mode: slideMode };
 
-    const slideOutPromise = slideOutAnimation(slideDirection, slideOpts);
+    const slideOutPromise = slideOutAnimation(transitionDirection, slideOpts);
     const prepPromise = entryPromise.catch((err) => {
-      console.warn('Failed to preload during slide-out:', err);
+      console.warn('Failed to preload during transition:', err);
       return null;
     });
     const [, entry] = await Promise.all([slideOutPromise, prepPromise]);
@@ -467,7 +463,7 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
   
   store.setFileInfo({ name: asset.name });
 
-  const wasImmersiveModeActive = isImmersiveModeActive();
+  const wasImmersiveModeActive = immersiveActive;
   if (wasImmersiveModeActive) {
     pauseImmersiveMode();
   }
@@ -575,9 +571,11 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
 
     if (focusDistanceOverride !== undefined) {
       store.setHasCustomFocus(true);
+      store.setFocusDistanceOverride(focusDistanceOverride);
       store.addLog(`Found focus distance override: ${focusDistanceOverride.toFixed(2)} units`);
     } else {
       store.setHasCustomFocus(false);
+      store.setFocusDistanceOverride(null);
     }
 
     if (cameraMetadata?.intrinsics) {
@@ -654,15 +652,20 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
         saveHomeView();
       }, { animate: shouldAnimateCamera });
       
-      // For non-cached slide transitions, we need to fade the canvas back in
-      // since slideOutAnimation ran but slideInAnimation didn't
-      if (slideDirection) {
+      if (shouldRunTransition) {
+        // Bring content back with fade/slide-in after camera is set
+        await slideInAnimation(transitionDirection, { duration: slideMode === 'fade' ? 750 : 1000, amount: 0.45, mode: slideMode });
         const viewerEl = document.getElementById('viewer');
         if (viewerEl) {
-          // Add slide-in to trigger fade-in transition, remove slide-out
+          viewerEl.classList.remove('slide-out');
+          viewerEl.classList.remove('slide-in');
+        }
+      } else if (slideDirection) {
+        // Legacy fade-in for slide transitions when slideOutAnimation was skipped
+        const viewerEl = document.getElementById('viewer');
+        if (viewerEl) {
           viewerEl.classList.remove('slide-out');
           viewerEl.classList.add('slide-in');
-          // Remove slide-in after transition completes (match CSS transition duration)
           setTimeout(() => {
             viewerEl.classList.remove('slide-in');
           }, 550);
