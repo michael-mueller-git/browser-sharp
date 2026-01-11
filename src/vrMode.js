@@ -105,6 +105,7 @@ const handleScaleKeydown = (event) => {
 };
 
 const ensureHands = () => {
+  return;
   if (!xrHands) {
     xrHands = new XrHands();
     xrHandMesh = xrHands.makeGhostMesh();
