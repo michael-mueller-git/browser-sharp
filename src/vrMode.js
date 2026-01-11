@@ -246,8 +246,19 @@ const handleVrGamepadInput = (dt) => {
           lastPrevMs = now;
         }
       }
+
+      const gripValue = buttons[BTN_GRIP]?.value ?? 0;
+      if (currentMesh && gripValue > 0.1) {
+        const currentScale = useStore.getState().vrModelScale || 1;
+        const scaledDepthSpeed = DEPTH_SPEED * currentScale;
+        // Push model away from camera when grip pressed
+        const depthDelta = -gripValue * scaledDepthSpeed * dt;
+        currentMesh.position.addScaledVector(forward, depthDelta);
+        requestRender();
+      }
     }
 
+    /*
     // ===== TRIGGERS FOR DEPTH (both controllers) =====
     // Trigger pulls model closer, so we sum both triggers
     const triggerValue = buttons[BTN_TRIGGER]?.value ?? 0;
@@ -259,7 +270,9 @@ const handleVrGamepadInput = (dt) => {
       currentMesh.position.addScaledVector(forward, depthDelta);
       requestRender();
     }
+    */
 
+    /*
     // Grip pushes model away
     const gripValue = buttons[BTN_GRIP]?.value ?? 0;
     if (currentMesh && gripValue > 0.1) {
@@ -270,9 +283,22 @@ const handleVrGamepadInput = (dt) => {
       currentMesh.position.addScaledVector(forward, depthDelta);
       requestRender();
     }
+    */
 
     // ===== LEFT CONTROLLER =====
     if (hand === "left") {
+
+      // Grip pushes model away
+      const gripValue = buttons[BTN_GRIP]?.value ?? 0;
+      if (currentMesh && gripValue > 0.1) {
+        const currentScale = useStore.getState().vrModelScale || 1;
+        const scaledDepthSpeed = DEPTH_SPEED * currentScale;
+        // Push model away from camera when grip pressed
+        const depthDelta = gripValue * scaledDepthSpeed * dt;
+        currentMesh.position.addScaledVector(forward, depthDelta);
+        requestRender();
+      }
+
       if (currentMesh) {
         // Get rotation pivot point (use model center or controls target)
         const pivot = controls?.target?.clone() ?? currentMesh.position.clone();
