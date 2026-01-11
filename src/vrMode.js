@@ -180,6 +180,10 @@ const handleVrGamepadInput = (dt) => {
     const gp = source?.gamepad;
     const hand = source?.handedness || "unknown";
     if (!gp) continue;
+    const isHand = !!source.hand;
+    if (isHand) {
+      continue;
+    }
 
     const axes = gp.axes || [];
     const buttons = gp.buttons || [];
