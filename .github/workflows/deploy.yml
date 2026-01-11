@@ -1,9 +1,6 @@
 name: Deploy to GitHub Pages
 
 on:
-  push:
-    branches:
-      - quest3
   # Allow manual triggering
   workflow_dispatch:
 
