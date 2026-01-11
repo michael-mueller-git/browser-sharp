@@ -16,7 +16,8 @@
           pname = "browser-sharp";
           version = "0.1.0";
           src = ./.;
-          npmDepsHash = "sha256-GkIBKfVj/MuBhrTrdHwjLYo6kyiPvy5ytmAoLT0dn/E=";
+          # npmDepsHash = pkgs.lib.fakeHash;
+          npmDepsHash = "sha256-Ql7dv8xfc+dbIKz6FV4VTjE41a1R1L392Au/flGLMpw=";
           installPhase = ''
             runHook preInstall
             mkdir -p $out
