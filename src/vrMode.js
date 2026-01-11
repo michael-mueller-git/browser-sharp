@@ -416,7 +416,7 @@ export const initVrSupport = (containerEl) => {
 
   try {
     vrButton = VRButton.createButton(renderer, {
-      optionalFeatures: ["hand-tracking"],
+      optionalFeatures: [ /*"hand-tracking" */],
     }, "immersive-vr"); // TODO show ar and vr button to let user choose between ar/vr mode
   } catch (err) {
     console.warn("VR button creation failed:", err);
