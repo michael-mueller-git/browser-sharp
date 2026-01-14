@@ -342,9 +342,7 @@ export const cancelSlideAnimation = () => {
   if (viewerEl) {
     viewerEl.classList.remove('slide-out', 'slide-in');
   }
-  if (bgImageContainer) {
-    bgImageContainer.classList.remove('blur-out');
-  }
+
 };
 
 /**
@@ -368,10 +366,7 @@ export const slideOutAnimation = (direction, { duration = 1200, amount = 0.45, f
     if (viewerEl) {
       viewerEl.classList.remove('slide-in');
     }
-    if (bgImageContainer) {
-      // Begin blurring the existing background immediately; fade happens later
-      bgImageContainer.classList.add('blur-out');
-    }
+ 
     
     // Schedule canvas blur for later in the animation (last 0.45s)
     const fadeTimeoutId = setTimeout(() => {
@@ -490,10 +485,7 @@ export const slideInAnimation = (direction, { duration = 1000, amount = 0.45, mo
     const viewerEl = document.getElementById('viewer');
     const canvas = viewerEl?.querySelector('canvas');
     
-    // Clear any lingering blur-out on background
-    if (bgImageContainer) {
-      bgImageContainer.classList.remove('blur-out');
-    }
+ 
 
     
     // For non-fade modes, remove slide-out synchronously before setting up camera
@@ -598,9 +590,7 @@ export const slideInAnimation = (direction, { duration = 1000, amount = 0.45, mo
         if (viewerEl) {
           viewerEl.classList.remove('slide-out', 'slide-in');
         }
-        if (bgImageContainer) {
-          bgImageContainer.classList.remove('blur-out');
-        }
+     
         resolve();
       }
     };

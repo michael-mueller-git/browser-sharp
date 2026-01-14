@@ -47,6 +47,8 @@ function App() {
   
   // Local state for viewer initialization
   const [viewerReady, setViewerReady] = useState(false);
+  // Landing screen visibility (controls TitleCard fade-in/out)
+  const [landingVisible, setLandingVisible] = useState(() => assets.length === 0);
   
   // Track mesh state
   const [hasMesh, setHasMesh] = useState(false);
@@ -78,15 +80,34 @@ function App() {
   }, [hasMesh]); // Re-run when hasMesh changes (when controls appear/disappear)
 
   /**
-   * Track mesh loading state - only update state when value changes
-   * to avoid unnecessary re-renders during animations
+   * Track mesh loading state with stability to prevent flickering.
+   * When mesh disappears, wait before updating state to avoid flicker during asset transitions.
+   * When mesh appears, update immediately for responsive UI.
    */
   useEffect(() => {
+    let timeout = null;
+    
     const checkMesh = () => {
       const meshPresent = !!currentMesh;
+      
+      // Clear any pending timeout
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+      
       if (meshPresent !== hasMeshRef.current) {
-        hasMeshRef.current = meshPresent;
-        setHasMesh(meshPresent);
+        if (meshPresent) {
+          // Mesh appeared - update immediately
+          hasMeshRef.current = true;
+          setHasMesh(true);
+        } else {
+          // Mesh disappeared - wait before updating to avoid flicker during transitions
+          timeout = setTimeout(() => {
+            hasMeshRef.current = false;
+            setHasMesh(false);
+          }, 300);
+        }
       }
     };
     
@@ -94,7 +115,10 @@ function App() {
     checkMesh();
     const interval = setInterval(checkMesh, 100);
     
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (timeout) clearTimeout(timeout);
+    };
   }, []);
 
   /**
@@ -146,7 +170,11 @@ function App() {
   const formatAccept = getFormatAccept();
 
   const handlePickFile = useCallback(() => {
-    fileInputRef.current?.click();
+    (async () => {
+      setLandingVisible(false);
+      await new Promise((r) => setTimeout(r, PANEL_TRANSITION_MS));
+      fileInputRef.current?.click();
+    })();
   }, []);
 
   const handleFileChange = useCallback(async (event) => {
@@ -161,7 +189,11 @@ function App() {
    * Title card actions: storage dialog
    */
   const handleOpenStorage = useCallback(() => {
-    setStorageDialogOpen(true);
+    (async () => {
+      setLandingVisible(false);
+      await new Promise((r) => setTimeout(r, PANEL_TRANSITION_MS));
+      setStorageDialogOpen(true);
+    })();
   }, []);
 
   const handleCloseStorage = useCallback(() => {
@@ -182,6 +214,9 @@ function App() {
    */
   const handleLoadDemo = useCallback(async () => {
     try {
+      // Fade out landing card before starting load
+      setLandingVisible(false);
+      await new Promise((r) => setTimeout(r, PANEL_TRANSITION_MS));
       let demo = getSource('demo-public-url');
       if (!demo) {
         const demoUrls = [
@@ -289,6 +324,13 @@ function App() {
     tryLoadDefaultSource();
   }, [viewerReady, assets.length, setStatus]);
 
+  // Keep landingVisible in sync: show when no assets, hide when assets present
+  useEffect(() => {
+    if (assets.length === 0) {
+      setLandingVisible(true);
+    }
+  }, [assets.length]);
+
   return (
     <div class={`page ${panelOpen ? 'panel-open' : ''}`}>
       <AssetSidebar />
@@ -301,14 +343,12 @@ function App() {
         onChange={handleFileChange}
       />
       <TitleCard
-        show={!hasMesh}
+        show={landingVisible && assets.length === 0}
         onPickFile={handlePickFile}
         onOpenStorage={handleOpenStorage}
         onLoadDemo={handleLoadDemo}
       />
-      <div class="viewer-container">
         <Viewer viewerReady={viewerReady} />
-      </div>
       {isMobile && isPortrait ? <MobileSheet /> : <SidePanel />}
       {/* Bottom controls container: sidebar index (left), nav (center), fullscreen+reset (right) */}
       <div class="bottom-controls" ref={bottomControlsRef}>
@@ -332,7 +372,7 @@ function App() {
 
         {/* Right: Fullscreen and reset buttons */}
         <div class="bottom-controls-right">
-          {hasMesh && (
+          {hasMesh && assets.length > 0 && (
             <>
               <button
                 class="bottom-page-btn"

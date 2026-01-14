@@ -2,6 +2,7 @@
   box-sizing: border-box;
 }
 
+html,
 :root {
   color: #e6ecf8;
   background: radial-gradient(circle at 20% 20%, rgba(84, 113, 255, 0.12), transparent 32%),
@@ -75,10 +76,11 @@ button, a, input, .sidebar-btn, .panel-toggle {
   flex: none;
   position: relative;
   z-index: 1;
-  background: linear-gradient(145deg, rgba(22, 26, 36, 0.9), rgba(10, 12, 18, 0.9));
+  background: #8080800d;
+  /* background: linear-gradient(145deg, rgba(22, 26, 36, 0.9), rgba(10, 12, 18, 0.9)); */
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 16px;
-  overflow: hidden;
+  /* overflow: hidden; */
   box-shadow: 0 10px 50px rgba(0, 0, 0, 0.45);
   transition: width 220ms ease, height 220ms ease;
 }
@@ -92,8 +94,37 @@ button, a, input, .sidebar-btn, .panel-toggle {
 
 /* Canvas always at bottom */
 .viewer canvas {
+    border-radius: 16px;
   position: relative;
   z-index: 0;
+}
+
+/* TitleCard overlay transition */
+.title-card-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  transition:
+    opacity 320ms ease,
+    transform 320ms ease,
+    display 400s allow-discrete;
+  transition-behavior: allow-discrete;
+  pointer-events: auto;
+}
+.title-card-overlay.is-hidden {
+  opacity: 0;
+  transform: translateY(8px) scale(0.995);
+  display: none;
+  pointer-events: none;
+}
+.title-card-overlay.is-visible {
+  opacity: 1;
+  display: flex;
+  transform: none;
+  pointer-events: auto;
 }
 
 .viewer.dragging {
@@ -134,18 +165,18 @@ button, a, input, .sidebar-btn, .panel-toggle {
 
 .viewer.slide-out .bg-image-container {
   opacity: 0;
-  transition:  opacity 0.2s ease .1s;
+  transition: opacity 0.45s ease-out;
 }
 
 .viewer.slide-in .bg-image-container {
   opacity: 0 !important;
-  transition: opacity 1s ease-in !important;
+  transition: opacity .5s ease-in !important;
 }
 
-.viewer.loading canvas {
-  filter: blur(24px);
+/* .viewer.loading canvas {
+  filter: blur(5px);
   opacity: 0.1;
-}
+} */
 
 .loading-overlay {
   position: absolute;
@@ -161,7 +192,7 @@ button, a, input, .sidebar-btn, .panel-toggle {
 }
 
 .viewer.loading .loading-overlay {
-  opacity: 1;
+  opacity: 0;
 }
 
 /* Hide canvas during fullscreen rebuilds to avoid visible glitches */
@@ -971,11 +1002,11 @@ button, a, input, .sidebar-btn, .panel-toggle {
   background-position: center center;
   background-repeat: no-repeat;
   opacity: 1;
-  filter: blur(20px);
+  filter: blur(40px);
   transition: opacity 0.4s ease, filter 0.6s ease;
   z-index: 0;
   /* Scale up to extend past edges for blur edge artifacts */
-  transform: scale(1.05);
+  /* transform: scaleX(1.05); */
   transform-origin: center center;
 }
 
@@ -983,17 +1014,11 @@ button, a, input, .sidebar-btn, .panel-toggle {
   opacity: 1;
 }
 
-.bg-image-container.blur-out {
-    /* transform: scale(1.3); */
-  filter: blur(30px);
-  transition: filter 0.6s ease , transform 0.6s ease;
-}
 
 /* In fullscreen, enhance the glow effect with more blur and scale */
 #viewer:fullscreen .bg-image-container,
 #viewer:-webkit-full-screen .bg-image-container {
   background-size: auto 100%;
-  filter: blur(30px) !important;
 }
 
 /* Fullscreen: UI elements moved inside viewer need explicit positioning and z-index */
@@ -2656,6 +2681,34 @@ select option {
 
 .source-expand:hover {
   color: #6ee7ff;
+}
+
+/* Larger invisible click target for the expand button */
+.expand-wrapper { position: relative; display: inline-block; }
+.expand-wrapper .expand-hit-area {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -8px;
+  background: transparent;
+  z-index: 1;
+}
+/* When hovering the larger hit area, apply the same hover style to the button */
+.expand-wrapper .expand-hit-area:hover + .source-expand {
+  color: #6ee7ff;
+}
+
+.status-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6ee7ff;
+}
+
+.upload-progress {
+  font-size: 12px;
+  color: #91c4cf;
 }
 
 .source-info {

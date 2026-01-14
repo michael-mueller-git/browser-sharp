@@ -458,6 +458,62 @@ export class SupabaseStorageSource extends AssetSource {
     return { success: results.failed.length === 0, ...results };
   }
 
+  async deleteAssets(items) {
+    if (!this._connected) {
+      const result = await this.connect({ refreshManifest: true });
+      if (!result.success) return { success: false, error: result.error };
+    }
+
+    await this._ensureManifestLoaded();
+    const manifest = this._manifest || { version: MANIFEST_VERSION, name: this.name, assets: [] };
+
+    const normalized = Array.isArray(items) ? items : [items];
+    const targetPaths = new Set();
+    const removedPaths = new Set();
+    const failures = [];
+
+    for (const item of normalized) {
+      const rawPath = typeof item === 'string'
+        ? item
+        : item?.path || item?._remoteAsset?.path;
+
+      if (!rawPath) {
+        failures.push({ path: null, error: 'Missing path' });
+        continue;
+      }
+
+      const relativePath = toRelativeFromBase(stripLeadingSlash(rawPath), this._basePrefix());
+      removedPaths.add(relativePath);
+
+      const manifestEntry = manifest.assets.find((a) => a.path === relativePath);
+      if (manifestEntry?.preview) {
+        targetPaths.add(this._toStoragePath(manifestEntry.preview));
+      }
+      if (manifestEntry?.metadata) {
+        targetPaths.add(this._toStoragePath(manifestEntry.metadata));
+      }
+
+      targetPaths.add(this._toStoragePath(relativePath));
+    }
+
+    if (targetPaths.size === 0) {
+      return { success: false, error: 'No valid paths to delete', failed: failures };
+    }
+
+    const { error } = await this._storage().remove(Array.from(targetPaths));
+    if (error) {
+      return { success: false, error: error.message, failed: failures };
+    }
+
+    if (removedPaths.size > 0) {
+      manifest.assets = manifest.assets.filter((a) => !removedPaths.has(a.path));
+      await this._saveManifest(manifest);
+      await this.listAssets();
+    }
+
+    return { success: failures.length === 0, removed: Array.from(removedPaths), failed: failures };
+  }
+
   /**
    * Probes the bucket for upload permission by writing and deleting a tiny temp object.
    * Avoids user-visible failures on first real upload.

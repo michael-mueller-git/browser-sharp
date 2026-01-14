@@ -1,24 +1,23 @@
 /**
  * File-based persistent storage module using IndexedDB.
- * Stores per-file settings including animation preferences,
- * optional focus distance override, and compressed preview images.
- * Uses file name as key for retrieval across sessions.
+ * Stores per-file settings (animation, focus distance) and binary preview blobs.
+ * Preview images are persisted as Blobs (WebP preferred) to avoid base64 bloat.
  */
 
 /** Database name */
 const DB_NAME = 'sharp-viewer-storage';
 
 /** Database version */
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
-/** Object store name */
+/** Object store name for settings */
 const STORE_NAME = 'file-settings';
 
-/** Maximum preview image dimension (width or height) */
-const MAX_PREVIEW_DIMENSION = 400;
+/** Object store name for preview blobs */
+const PREVIEW_STORE_NAME = 'file-previews';
 
-/** JPEG quality for preview compression (0-1) */
-const PREVIEW_QUALITY = 0.6;
+/** Preview schema version to force regeneration when encoding changes */
+const PREVIEW_VERSION = 1;
 
 /**
  * File settings schema.
@@ -28,7 +27,6 @@ const PREVIEW_QUALITY = 0.6;
  * @property {number} lastModified - Timestamp of last update
  * @property {AnimationSettings} [animation] - Load animation preferences
  * @property {number} [focusDistance] - Optional user-set focus distance override
- * @property {string} [preview] - Compressed preview image data URL
  */
 
 /**
@@ -74,48 +72,14 @@ const openDatabase = () => {
         const objectStore = db.createObjectStore(STORE_NAME, { keyPath: 'fileName' });
         objectStore.createIndex('lastModified', 'lastModified', { unique: false });
       }
-    };
-  });
-};
 
-/**
- * Compresses an image data URL for storage.
- * Resizes if needed and applies JPEG compression.
- * @param {string} dataUrl - Original image data URL
- * @returns {Promise<string>} Compressed data URL
- */
-const compressPreviewImage = (dataUrl) => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-
-    img.onload = () => {
-      // Calculate dimensions maintaining aspect ratio
-      let width = img.width;
-      let height = img.height;
-
-      if (width > MAX_PREVIEW_DIMENSION || height > MAX_PREVIEW_DIMENSION) {
-        if (width > height) {
-          height = (height / width) * MAX_PREVIEW_DIMENSION;
-          width = MAX_PREVIEW_DIMENSION;
-        } else {
-          width = (width / height) * MAX_PREVIEW_DIMENSION;
-          height = MAX_PREVIEW_DIMENSION;
-        }
+      // Store preview blobs separately to avoid embedding base64 in settings
+      if (!db.objectStoreNames.contains(PREVIEW_STORE_NAME)) {
+        const previewStore = db.createObjectStore(PREVIEW_STORE_NAME, { keyPath: 'fileName' });
+        previewStore.createIndex('updated', 'updated', { unique: false });
+        previewStore.createIndex('version', 'version', { unique: false });
       }
-
-      // Draw to canvas and compress
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-
-      const compressed = canvas.toDataURL('image/jpeg', PREVIEW_QUALITY);
-      resolve(compressed);
     };
-
-    img.onerror = () => reject(new Error('Failed to load image for compression'));
-    img.src = dataUrl;
   });
 };
 
@@ -178,15 +142,13 @@ export const saveFileSettings = async (fileName, settings) => {
       lastModified: Date.now(),
     };
 
-    // Compress preview image if provided
-    if (settings.preview && settings.preview.startsWith('data:image')) {
-      settings.preview = await compressPreviewImage(settings.preview);
-    }
+    // Preview images are stored separately as Blobs; ignore legacy inline previews
+    const { preview: _ignoredPreview, ...rest } = settings || {};
 
     // Merge with existing
     const updated = {
       ...existing,
-      ...settings,
+      ...rest,
       fileName, // Ensure key is present
       lastModified: Date.now(),
     };
@@ -223,16 +185,6 @@ export const saveAnimationSettings = async (fileName, animation) => {
  */
 export const saveFocusDistance = async (fileName, focusDistance) => {
   return await saveFileSettings(fileName, { focusDistance });
-};
-
-/**
- * Saves preview image for a file.
- * @param {string} fileName - File name
- * @param {string} previewDataUrl - Preview image data URL
- * @returns {Promise<boolean>} Success status
- */
-export const savePreviewImage = async (fileName, previewDataUrl) => {
-  return await saveFileSettings(fileName, { preview: previewDataUrl });
 };
 
 /**
@@ -334,5 +286,110 @@ export const clearAllFileSettings = async () => {
   } catch (error) {
     console.error('Failed to clear all settings:', error);
     return 0;
+  }
+};
+
+/**
+ * Validates preview record version/shape.
+ * Returns null when regeneration is required.
+ */
+const normalizePreviewRecord = (record) => {
+  if (!record || record.version !== PREVIEW_VERSION) return null;
+  if (!record.blob || !record.blob.size) return null;
+  return record;
+};
+
+/**
+ * Saves a preview Blob for a file.
+ * We persist binary data in IndexedDB to avoid base64 size overhead.
+ */
+export const savePreviewBlob = async (fileName, blob, metadata = {}) => {
+  try {
+    if (!blob) return false;
+    const db = await openDatabase();
+
+    const record = {
+      fileName,
+      blob,
+      version: PREVIEW_VERSION,
+      width: metadata.width,
+      height: metadata.height,
+      format: metadata.format,
+      updated: Date.now(),
+    };
+
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([PREVIEW_STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(PREVIEW_STORE_NAME);
+      const request = store.put(record);
+      request.onsuccess = () => resolve(true);
+      request.onerror = () => reject(new Error(`Failed to save preview for ${fileName}`));
+    });
+  } catch (error) {
+    console.error(`Failed to save preview for ${fileName}:`, error);
+    return false;
+  }
+};
+
+/**
+ * Loads a preview Blob for a file.
+ * @returns {Promise<{fileName:string, blob:Blob, width?:number, height?:number, format?:string, updated?:number, version:number}|null>}
+ */
+export const loadPreviewBlob = async (fileName) => {
+  try {
+    const db = await openDatabase();
+
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([PREVIEW_STORE_NAME], 'readonly');
+      const store = transaction.objectStore(PREVIEW_STORE_NAME);
+      const request = store.get(fileName);
+
+      request.onsuccess = () => {
+        resolve(normalizePreviewRecord(request.result));
+      };
+
+      request.onerror = () => reject(new Error(`Failed to load preview for ${fileName}`));
+    });
+  } catch (error) {
+    console.error(`Failed to load preview for ${fileName}:`, error);
+    return null;
+  }
+};
+
+/**
+ * Deletes a stored preview Blob for a file.
+ */
+export const deletePreviewBlob = async (fileName) => {
+  try {
+    const db = await openDatabase();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([PREVIEW_STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(PREVIEW_STORE_NAME);
+      const request = store.delete(fileName);
+      request.onsuccess = () => resolve(true);
+      request.onerror = () => reject(new Error(`Failed to delete preview for ${fileName}`));
+    });
+  } catch (error) {
+    console.error(`Failed to delete preview for ${fileName}:`, error);
+    return false;
+  }
+};
+
+/**
+ * Clears all stored preview blobs.
+ */
+export const clearAllPreviewBlobs = async () => {
+  try {
+    const db = await openDatabase();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([PREVIEW_STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(PREVIEW_STORE_NAME);
+      const clearRequest = store.clear();
+      clearRequest.onsuccess = () => resolve(true);
+      clearRequest.onerror = () => reject(new Error('Failed to clear preview blobs'));
+    });
+  } catch (error) {
+    console.error('Failed to clear preview blobs:', error);
+    return false;
   }
 };

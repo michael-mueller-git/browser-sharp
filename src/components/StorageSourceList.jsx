@@ -20,7 +20,6 @@ import {
   faChevronRight,
   faUnlock,
   faUpload,
-  faSearch,
   faLink,
 } from '@fortawesome/free-solid-svg-icons';
 import {
@@ -46,7 +45,15 @@ const TYPE_LABELS = {
   'public-url': 'URL',
 };
 
-const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.tif', '.tiff'];
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.tif', '.tiff', '.heic'];
+
+const formatEta = (seconds) => {
+  const remaining = Math.max(0, Math.ceil(seconds));
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+  if (mins > 0) return `${mins}m ${secs}s`;
+  return `${secs}s`;
+};
 
 /**
  * Individual source item with controls
@@ -55,6 +62,8 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
   const [status, setStatus] = useState('checking');
   const [assetCount, setAssetCount] = useState(source.getAssets().length);
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [pendingImageFiles, setPendingImageFiles] = useState([]);
   const [pendingOtherFiles, setPendingOtherFiles] = useState([]);
@@ -70,17 +79,53 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
     return collectionId ? `collections/${collectionId}/assets` : 'collections/default/assets';
   }, [source?.config?.config?.collectionId]);
 
+  useEffect(() => {
+    console.log('upload flags changed', { isLoading, isUploading, uploadProgress, status });
+  }, [isLoading, isUploading, uploadProgress, status]);
+
+  const refreshAssets = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      if (source.type === 'supabase-storage' && typeof source.rescan === 'function') {
+        const applied = await source.rescan({ applyChanges: true });
+        if (!applied?.success) {
+          setStatus('error');
+          return false;
+        }
+      }
+
+      const assets = await source.listAssets();
+      setAssetCount(assets.length);
+      setStatus('connected');
+      return true;
+    } catch (err) {
+      console.error('Refresh failed:', err);
+      setStatus('error');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [source]);
+
   const isSupportedFile = useCallback((file) => {
     if (!file?.name) return false;
     const ext = file.name.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
     return supportedExtensions.includes(ext);
   }, [supportedExtensions]);
 
+  const isImageFile = useCallback((file) => {
+    if (!file) return false;
+    const type = file.type || '';
+    const name = (file.name || '').toLowerCase();
+    return type.startsWith('image/') || IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext));
+  }, []);
+
   const processUploads = useCallback(async (files) => {
     if (!files?.length || source.type !== 'supabase-storage' || typeof source.uploadAssets !== 'function') return;
 
     const valid = files.filter(isSupportedFile);
     const skipped = files.length - valid.length;
+    const hasImages = valid.some(isImageFile);
 
     if (valid.length === 0) {
       alert(`No supported files. Supported: ${supportedExtensions.join(', ')}`);
@@ -88,14 +133,24 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
     }
 
     setIsLoading(true);
+    setIsUploading(hasImages);
+    setUploadProgress(hasImages ? { completed: 0, total: valid.length } : null);
+    console.log('upload start', { total: valid.length, showProgress: hasImages });
     try {
       const result = await source.uploadAssets(valid);
-      if (result?.success) {
-        const rescanOk = await runRescanAndRefresh();
-        if (!rescanOk) {
-          setStatus('error');
-        }
-      } else {
+      const completed = Array.isArray(result?.uploaded) ? result.uploaded.length : 0;
+      if (hasImages) {
+        setUploadProgress({ completed, total: valid.length });
+      }
+      console.log('upload api result', { completed, total: valid.length, failed: result?.failed?.length, success: result?.success });
+
+      if (!result?.success) {
+        setStatus('error');
+        return;
+      }
+
+      const refreshOk = await refreshAssets();
+      if (!refreshOk) {
         setStatus('error');
       }
 
@@ -107,48 +162,11 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
       setStatus('error');
     } finally {
       setIsLoading(false);
+      setIsUploading(false);
+      setUploadProgress(null);
+      console.log('upload end');
     }
-  }, [isSupportedFile, source, supportedExtensions]);
-
-  const isImageFile = useCallback((file) => {
-    if (!file) return false;
-    const type = file.type || '';
-    const name = (file.name || '').toLowerCase();
-    return type.startsWith('image/') || IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext));
-  }, []);
-
-  const refreshAssets = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const assets = await source.listAssets();
-      setAssetCount(assets.length);
-      setStatus('connected');
-    } catch (err) {
-      console.error('Refresh failed:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [source]);
-
-  const runRescanAndRefresh = useCallback(async () => {
-    if (source.type !== 'supabase-storage' || typeof source.rescan !== 'function') return false;
-    setIsLoading(true);
-    try {
-      const applied = await source.rescan({ applyChanges: true });
-      if (!applied?.success) {
-        setStatus('error');
-        return false;
-      }
-      await refreshAssets();
-      return true;
-    } catch (err) {
-      console.error('Rescan failed:', err);
-      setStatus('error');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [refreshAssets, source]);
+  }, [isImageFile, isSupportedFile, refreshAssets, source, supportedExtensions]);
 
   const handleFilesSelected = useCallback(async (files) => {
     if (!files?.length || source.type !== 'supabase-storage') return;
@@ -174,9 +192,18 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
 
     setShowConvertModal(false);
     setIsLoading(true);
+    setIsUploading(true);
+    setUploadProgress({ completed: 0, total: pendingImageFiles.length });
+    console.log('convert start', { total: pendingImageFiles.length });
 
     try {
-      const results = await testSharpCloud(pendingImageFiles, { prefix: collectionPrefix });
+      const results = await testSharpCloud(pendingImageFiles, {
+        prefix: collectionPrefix,
+        onProgress: (progress) => {
+          console.log('convert progress', progress);
+          setUploadProgress(progress);
+        },
+      });
       const failures = results.filter((r) => !r.ok);
 
       if (pendingOtherFiles.length > 0) {
@@ -185,7 +212,7 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
 
       const anySuccess = results.some((r) => r.ok);
       if (anySuccess) {
-        await runRescanAndRefresh();
+        await refreshAssets();
       }
 
       if (failures.length > 0) {
@@ -197,8 +224,10 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
       setPendingImageFiles([]);
       setPendingOtherFiles([]);
       setIsLoading(false);
+      setIsUploading(false);
+      setUploadProgress(null);
     }
-  }, [collectionPrefix, pendingImageFiles, pendingOtherFiles, processUploads, runRescanAndRefresh]);
+  }, [collectionPrefix, pendingImageFiles, pendingOtherFiles, processUploads, refreshAssets]);
 
   const handleCancelConvert = useCallback(async () => {
     setShowConvertModal(false);
@@ -207,6 +236,8 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
     }
     setPendingImageFiles([]);
     setPendingOtherFiles([]);
+    setIsUploading(false);
+    setUploadProgress(null);
   }, [pendingOtherFiles, processUploads]);
 
   // Check connection status on mount
@@ -366,13 +397,6 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
     await refreshAssets();
   }, [refreshAssets, source]);
 
-  const handleRescan = useCallback(async (e) => {
-    e.stopPropagation();
-    if (source.type !== 'supabase-storage' || typeof source.rescan !== 'function') return;
-
-    await runRescanAndRefresh();
-  }, [runRescanAndRefresh, source]);
-
   const handleUploadClick = useCallback(async (e) => {
     e.stopPropagation();
     if (source.type !== 'supabase-storage') return;
@@ -431,6 +455,33 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
   const isConnected = status === 'connected';
   const needsPermission = status === 'needs-permission';
   const isDefault = Boolean(source?.config?.isDefault);
+  const showUploadProgress = isUploading && uploadProgress;
+
+  // ETA countdown state: set when progress updates, tick down every second while uploading
+  const [etaSeconds, setEtaSeconds] = useState(0);
+  useEffect(() => {
+    if (!showUploadProgress || !uploadProgress) {
+      setEtaSeconds(0);
+      return;
+    }
+
+    const remaining = Math.max(0, (uploadProgress.total - (uploadProgress.completed || 0)) * 40);
+    setEtaSeconds(remaining);
+
+    const intervalId = setInterval(() => {
+      setEtaSeconds((s) => {
+        if (s <= 1) {
+          clearInterval(intervalId);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [showUploadProgress, uploadProgress?.completed, uploadProgress?.total]);
+
+  const etaLabel = showUploadProgress ? formatEta(etaSeconds) : '';
 
   const handleSetDefault = useCallback(async (e) => {
     e.stopPropagation();
@@ -460,12 +511,20 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
         class={`source-item ${isConnected ? 'connected' : ''} ${status} ${isActive ? 'active' : ''}`}
         onClick={handleClick}
       >
-      <button 
-        class="source-expand"
-        onClick={(e) => { e.stopPropagation(); onToggleExpand?.(); }}
-      >
-        <FontAwesomeIcon icon={expanded ? faChevronDown : faChevronRight} />
-      </button>
+      <div class="expand-wrapper" style={{ position: 'relative', display: 'inline-block' }}>
+        <div
+          class="expand-hit-area"
+          style={{  width: "60px", position: 'absolute', top: '-8px', left: '-8px', right: '-8px', bottom: '-8px', background: 'transparent', zIndex: 1 }}
+          onClick={(e) => { e.stopPropagation(); onToggleExpand?.(); }}
+        />
+        <button 
+          class="source-expand"
+          onClick={(e) => { e.stopPropagation(); onToggleExpand?.(); }}
+          style={{ position: 'relative', zIndex: 2, marginLeft: '2px' }}
+        >
+          <FontAwesomeIcon icon={expanded ? faChevronDown : faChevronRight} />
+        </button>
+      </div>
 
       <div class="source-info">
         <div class="source-name">
@@ -482,7 +541,14 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
 
       <div class="source-status">
         {isLoading ? (
-          <FontAwesomeIcon icon={faSpinner} spin />
+          <div class="status-loading">
+            {showUploadProgress && (
+              <span class="upload-progress">
+                {uploadProgress?.completed}/{uploadProgress?.total}  {etaLabel}
+              </span>
+            )}
+            <FontAwesomeIcon icon={faSpinner} spin />
+          </div>
         ) : isConnected ? (
           <></>
         ) : needsPermission ? (
@@ -540,14 +606,6 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
                 <FontAwesomeIcon icon={faUpload} />
                 <span>Upload</span>
               </button>
-              <button
-                class="source-action-btn"
-                onClick={handleRescan}
-                title="Rescan storage and update manifest"
-              >
-                <FontAwesomeIcon icon={faSearch} />
-                <span>Rescan</span>
-              </button>
             </>
           )}
           <button 
@@ -570,7 +628,7 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
             <p class="modal-subnote">Prefix: {collectionPrefix}</p>
             <div class="modal-actions">
               <button onClick={handleCancelConvert}>Cancel</button>
-              <button class="danger" onClick={handleConfirmConvert}>Convert & Upload</button>
+              <button  onClick={handleConfirmConvert}>Convert & Upload</button>
             </div>
           </div>
         </div>

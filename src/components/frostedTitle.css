@@ -74,7 +74,7 @@
   mask-position: center;
   -webkit-mask-mode: alpha;
   mask-mode: alpha;
-  inset: -4px;
+  inset: -3px;
 }
 
 .frosted-hero__blur-layer--fill::before {
@@ -116,10 +116,10 @@
 
 /* rotate: stronger rotation + pan */
 .frosted-hero--anim-rotate .frosted-hero__blur-layer::before {
-  animation: frosted-pan 50s ease-in-out infinite alternate-reverse, frosted-rotate 80s linear 0s infinite;
+  animation: frosted-pan 40s ease-in-out infinite alternate-reverse, frosted-rotate 60s linear 0s infinite;
 }
 .frosted-hero--anim-rotate .frosted-hero__blur-layer--stroke::before {
-  animation: frosted-pan 50s ease-in-out .6s infinite alternate-reverse, frosted-rotate 80s linear 0s infinite;
+  animation: frosted-pan 40s ease-in-out .6s infinite alternate-reverse, frosted-rotate 60s linear 0s infinite;
 }
 
 /* random: pan + slow rotation + jitter */

@@ -18,10 +18,11 @@ function AssetSidebar() {
 
   const isVisible = useStore((state) => state.assetSidebarOpen);
   const setIsVisible = useStore((state) => state.setAssetSidebarOpen);
-  const imageAccept = '.jpg,.jpeg,.png,.webp,.avif,.tif,.tiff,image/*';
+  const imageAccept = '.jpg,.jpeg,.png,.webp,.avif,.tif,.tiff,.heic,image/*';
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteScope, setDeleteScope] = useState('single'); // 'single' or 'all'
   const [clearMetadata, setClearMetadata] = useState(false);
+  const [deleteRemote, setDeleteRemote] = useState(false);
   const sidebarRef = useRef(null);
   const fileInputRef = useRef(null);
   const hoverTargetRef = useRef(null);
@@ -110,6 +111,7 @@ function AssetSidebar() {
   const handleDeleteClick = () => {
     setDeleteScope('single');
     setClearMetadata(false);
+    setDeleteRemote(false);
     setShowDeleteModal(true);
     openedByHoverRef.current = false; // explicit action
   };
@@ -144,7 +146,47 @@ function AssetSidebar() {
     }
   };
 
+  const deleteSupabaseAssets = async (targetAssets) => {
+    const bySource = new Map();
+    targetAssets.forEach((asset) => {
+      if (asset?.sourceType !== 'supabase-storage') return;
+      if (!asset.path && !asset?._remoteAsset?.path) return;
+      const list = bySource.get(asset.sourceId) || [];
+      list.push(asset);
+      bySource.set(asset.sourceId, list);
+    });
+
+    for (const [sourceId, sourceAssets] of bySource.entries()) {
+      const source = getSource(sourceId);
+      if (!source || typeof source.deleteAssets !== 'function') {
+        console.warn('Supabase source missing delete support for', sourceId);
+        continue;
+      }
+
+      const paths = sourceAssets
+        .map((asset) => asset.path || asset?._remoteAsset?.path)
+        .filter(Boolean);
+
+      if (paths.length === 0) continue;
+
+      const result = await source.deleteAssets(paths);
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to delete from Supabase');
+      }
+    }
+  };
+
   const confirmDelete = async () => {
+    const targets = deleteScope === 'single' ? [assets[currentAssetIndex]] : assets;
+
+    try {
+      if (deleteRemote) {
+        await deleteSupabaseAssets(targets);
+      }
+    } catch (err) {
+      alert(err.message || 'Failed to delete from Supabase');
+    }
+
     if (deleteScope === 'single') {
       const asset = assets[currentAssetIndex];
       if (clearMetadata && asset) {
@@ -221,14 +263,14 @@ function AssetSidebar() {
         </div>
         <div class="sidebar-footer">
           <div class="sidebar-controls">
-    <button 
+            <button 
               class="sidebar-btn add" 
               onClick={handleAddClick}
               title="Add files"
             >
               <FontAwesomeIcon icon={faPlus} />
             </button>
-      
+            
             <button 
               class="sidebar-btn delete" 
               onClick={handleDeleteClick}
@@ -274,11 +316,18 @@ function AssetSidebar() {
                 );
               }
 
-              if (isSupabase) {
-                // Supabase messaging will be handled separately per request
+              if (isSupabase && !deleteRemote) {
                 return (
                   <p class="modal-note">
-                    Removing here only clears it from the app; file remains in the Supabase collection.
+                    Removing here only clears it from the app; file remains in the Supabase collection. Enable the checkbox below to delete remotely.
+                  </p>
+                );
+              }
+
+              if (isSupabase && deleteRemote) {
+                return (
+                  <p class="modal-note">
+                    Selected item will be deleted from the Supabase collection and removed from the app.
                   </p>
                 );
               }
@@ -314,6 +363,30 @@ function AssetSidebar() {
                 Remove all images from queue
               </label>
             </div>
+
+            {(() => {
+              const hasSupabase = deleteScope === 'single'
+                ? assets[currentAssetIndex]?.sourceType === 'supabase-storage'
+                : assets.some((a) => a?.sourceType === 'supabase-storage');
+
+              if (!hasSupabase) return null;
+
+              return (
+                <div class="modal-checkbox">
+                  <label>
+                    <input 
+                      type="checkbox" 
+                      checked={deleteRemote}
+                      onChange={(e) => setDeleteRemote(e.target.checked)}
+                    />
+                    Delete from Supabase storage
+                  </label>
+                  <div class="modal-subnote">
+                    Removes files and manifest entries from the linked Supabase collection using the stored collection credentials.
+                  </div>
+                </div>
+              );
+            })()}
 
             <div class="modal-checkbox">
               <label>

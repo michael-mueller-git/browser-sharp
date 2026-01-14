@@ -16,6 +16,22 @@ let onPreviewGeneratedCallback = null;
 // Store reference to capture function (injected from fileLoader)
 let capturePreviewFn = null;
 
+const isObjectUrl = (value) => typeof value === 'string' && value.startsWith('blob:');
+
+const replaceAssetPreviewUrl = (asset, url) => {
+  if (!asset) return;
+  if (asset.preview && isObjectUrl(asset.preview) && asset.preview !== url) {
+    URL.revokeObjectURL(asset.preview);
+  }
+  asset.preview = url;
+};
+
+const revokeAssetPreviewUrl = (asset) => {
+  if (asset?.preview && isObjectUrl(asset.preview)) {
+    URL.revokeObjectURL(asset.preview);
+  }
+};
+
 /**
  * Set the function used to capture previews from the main renderer
  */
@@ -24,21 +40,35 @@ export const setCapturePreviewFn = (fn) => {
 };
 
 /**
- * Capture preview for the current asset using the main renderer
- * This is called after an asset is loaded and rendered
+ * Capture preview for the current asset using the main renderer.
+ * Uses object URLs to avoid embedding base64 previews in memory/state.
  */
-export const captureCurrentAssetPreview = () => {
-  if (currentAssetIndex < 0 || !capturePreviewFn) return;
+export const captureCurrentAssetPreview = async () => {
+  if (currentAssetIndex < 0 || !capturePreviewFn) return null;
   
   const asset = assetList[currentAssetIndex];
-  if (!asset || asset.preview) return; // Already has preview
+  if (!asset) return null;
   
-  const dataUrl = capturePreviewFn();
-  if (dataUrl) {
-    asset.preview = dataUrl;
+  try {
+    const result = await capturePreviewFn();
+    if (!result || !result.url) return null;
+
+    replaceAssetPreviewUrl(asset, result.url);
+    asset.previewSource = result.source ?? 'generated';
+    asset.previewMeta = {
+      width: result.width,
+      height: result.height,
+      format: result.format,
+      updated: result.updated ?? Date.now(),
+    };
+
     if (onPreviewGeneratedCallback) {
-      onPreviewGeneratedCallback(asset, currentAssetIndex);
+      onPreviewGeneratedCallback(asset, currentAssetIndex, result);
     }
+    return result;
+  } catch (err) {
+    console.warn('Failed to capture preview', err);
+    return null;
   }
 };
 
@@ -59,16 +89,9 @@ const getBaseName = (filename) => {
 };
 
 /**
- * Load an image file as a data URL
+ * Create an object URL for a File so previews avoid base64 overhead.
  */
-const loadImageAsDataUrl = (file) => {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => resolve(null);
-    reader.readAsDataURL(file);
-  });
-};
+const createObjectUrl = (file) => URL.createObjectURL(file);
 
 /**
  * Filter and sort files by supported extensions
@@ -113,11 +136,10 @@ const matchPreviewImages = async (assets, imageFiles) => {
     const matchingImage = imageMap.get(assetBaseName);
     
     if (matchingImage) {
-      const dataUrl = await loadImageAsDataUrl(matchingImage);
-      if (dataUrl) {
-        asset.preview = dataUrl;
-        asset.previewSource = "image"; // Mark as image-sourced preview
-      }
+      const objectUrl = createObjectUrl(matchingImage);
+      replaceAssetPreviewUrl(asset, objectUrl);
+      asset.previewSource = "image"; // Mark as image-sourced preview
+      asset.previewMeta = { source: 'sidecar', updated: Date.now() };
     }
   }
   
@@ -164,6 +186,9 @@ export const addAssets = async (files) => {
  * Also looks for matching image files to use as previews
  */
 export const setAssetList = async (files) => {
+  // Release existing object URLs before replacing the list
+  assetList.forEach(revokeAssetPreviewUrl);
+
   const supportedFiles = filterSupportedFiles(files);
   
   if (supportedFiles.length === 0) {
@@ -231,6 +256,7 @@ export const setCurrentAssetIndex = (index) => {
  */
 export const removeAsset = (index) => {
   if (index < 0 || index >= assetList.length) return false;
+  revokeAssetPreviewUrl(assetList[index]);
   
   assetList.splice(index, 1);
   
@@ -307,6 +333,7 @@ export const onPreviewGenerated = (callback) => {
  * Clear all assets
  */
 export const clearAssets = () => {
+  assetList.forEach(revokeAssetPreviewUrl);
   assetList = [];
   currentAssetIndex = -1;
 };
@@ -317,6 +344,7 @@ export const clearAssets = () => {
  * @param {Object[]} assets - Array of asset descriptors
  */
 export const setAdaptedAssets = (assets) => {
+  assetList.forEach(revokeAssetPreviewUrl);
   assetList = assets.map((asset, index) => ({
     ...asset,
     id: asset.id || `adapted-${Date.now()}-${index}`,

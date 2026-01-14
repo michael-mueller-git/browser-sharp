@@ -1,9 +1,21 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" >
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>3DGS PLY Viewer</title>
+    <!-- Critical inline background to prevent white flash before stylesheet loads -->
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        background: radial-gradient(circle at 20% 20%, rgba(84, 113, 255, 0.12), transparent 32%),
+                    radial-gradient(circle at 80% 10%, rgba(0, 200, 160, 0.18), transparent 28%),
+                    #0b0d12;
+        color: #e6ecf8;
+      }
+      #app { height: 100vh; }
+    </style>
   </head>
   <body>
     <div id="app"></div>

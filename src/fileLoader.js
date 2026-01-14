@@ -20,11 +20,10 @@ import {
   activeCamera,
   stereoEffect,
   requestRender,
-  updateBackgroundImage,
-  setBgImageUrl,
   THREE,
 } from "./viewer.js";
-import { savePreviewImage } from "./fileStorage.js";
+import { applyPreviewBackground, captureAndApplyBackground, clearBackground } from "./backgroundManager.js";
+import { savePreviewBlob, loadPreviewBlob } from "./fileStorage.js";
 import {
   fitViewToMesh,
   applyMetadataCamera,
@@ -47,9 +46,7 @@ const cleanupSlideTransitionState = () => {
     viewerEl.classList.remove('slide-out', 'slide-in');
   }
   const bgContainer = document.querySelector('.bg-image-container');
-  if (bgContainer) {
-    bgContainer.classList.remove('blur-out');
-  }
+ 
   cancelSlideAnimation();
 };
 import {
@@ -91,6 +88,19 @@ const PREVIEW_CAPTURE_FRAME = 60;
 /** Frame at which to capture for cached splats */
 const PREVIEW_CAPTURE_FRAME_CACHED = 10;
 
+/** Target height for generated previews (width auto-calculated) */
+const PREVIEW_TARGET_HEIGHT = 128;
+
+/** Preferred WebP quality for compact previews */
+const PREVIEW_WEBP_QUALITY = 0.5;
+
+/** JPEG fallback quality when WebP is unavailable */
+const PREVIEW_JPEG_QUALITY = 0.35;
+
+/** Debug helper: force camera far out to inspect backgrounds */
+const DEBUG_FORCE_ZOOM_OUT = false; // set true to enable debug zoom-out
+const DEBUG_ZOOM_MULTIPLIER = 6; // how much farther to push camera back
+
 /** Page padding in pixels */
 const PAGE_PADDING = 36;
 
@@ -106,6 +116,35 @@ const getStoreState = () => useStore.getState();
 /** Supported file extensions for display */
 const supportedExtensions = getSupportedExtensions();
 const supportedExtensionsText = supportedExtensions.join(", ");
+
+const isObjectUrl = (value) => typeof value === 'string' && value.startsWith('blob:');
+
+const replacePreviewUrl = (asset, url) => {
+  if (!asset) return;
+  if (asset.preview && isObjectUrl(asset.preview) && asset.preview !== url) {
+    URL.revokeObjectURL(asset.preview);
+  }
+  asset.preview = url;
+};
+
+const hydrateAssetPreviewFromStorage = async (asset) => {
+  if (!asset || asset.preview) return null;
+  const storedPreview = await loadPreviewBlob(asset.name);
+  if (storedPreview?.blob) {
+    const objectUrl = URL.createObjectURL(storedPreview.blob);
+    replacePreviewUrl(asset, objectUrl);
+    asset.previewSource = 'indexeddb';
+    asset.previewMeta = {
+      width: storedPreview.width,
+      height: storedPreview.height,
+      format: storedPreview.format,
+      updated: storedPreview.updated,
+    };
+    return storedPreview;
+  }
+  replacePreviewUrl(asset, null);
+  return null;
+};
 
 const isFile = (value) => typeof File !== "undefined" && value instanceof File;
 
@@ -304,86 +343,96 @@ export const resize = () => {
   requestRender();
 };
 
-/**
- * Captures a JPEG thumbnail of the current render.
- * Used for asset gallery previews.
- * @returns {string|null} Data URL of captured image, or null if no mesh loaded
- */
-const capturePreviewThumbnail = () => {
-  if (!currentMesh) return null;
-  
-  // Render with solid background for capture
-  scene.background = new THREE.Color("#0c1018");
-  renderer.setClearColor(0x0c1018, 1);
-  composer.render();
-  
-  const dataUrl = renderer.domElement.toDataURL("image/jpeg", 0.85);
-  
-  // Restore transparent background
-  scene.background = null;
-  renderer.setClearColor(0x000000, 0);
-  
-  return dataUrl;
+const canvasToBlob = (canvas, type, quality) => new Promise((resolve) => {
+  canvas.toBlob((blob) => resolve(blob || null), type, quality);
+});
+
+const encodePreviewCanvas = async (canvas) => {
+  const webpBlob = await canvasToBlob(canvas, 'image/webp', PREVIEW_WEBP_QUALITY);
+  if (webpBlob) return { blob: webpBlob, format: 'image/webp' };
+
+  const jpegBlob = await canvasToBlob(canvas, 'image/jpeg', PREVIEW_JPEG_QUALITY);
+  if (jpegBlob) return { blob: jpegBlob, format: 'image/jpeg' };
+
+  try {
+    const dataUrl = canvas.toDataURL('image/jpeg', PREVIEW_JPEG_QUALITY);
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    return { blob, format: blob.type || 'image/jpeg', fallback: true };
+  } catch (err) {
+    console.warn('Preview encoding fallback failed', err);
+    return null;
+  }
 };
 
-// Register capture function with asset manager
-setCapturePreviewFn(capturePreviewThumbnail);
+const capturePreviewBlob = async () => {
+  if (!currentMesh) return null;
+
+  const clearColor = new THREE.Color();
+  renderer.getClearColor(clearColor);
+  const clearAlpha = renderer.getClearAlpha();
+  const originalBackground = scene.background;
+
+  // Render with clear background for preview capture
+  scene.background = null;
+  renderer.setClearColor(0x000000, 0);
+  composer.render();
+
+  const sourceCanvas = renderer.domElement;
+  const scale = PREVIEW_TARGET_HEIGHT / Math.max(1, sourceCanvas.height);
+  const targetWidth = Math.max(1, Math.round(sourceCanvas.width * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = PREVIEW_TARGET_HEIGHT;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(sourceCanvas, 0, 0, targetWidth, PREVIEW_TARGET_HEIGHT);
+
+  const encoded = await encodePreviewCanvas(canvas);
+
+  // Restore original background/clear state after capture
+  scene.background = originalBackground;
+  renderer.setClearColor(clearColor, clearAlpha);
+
+  if (!encoded) return null;
+
+  return {
+    ...encoded,
+    width: targetWidth,
+    height: PREVIEW_TARGET_HEIGHT,
+  };
+};
+
+const applyDebugZoomOut = () => {
+  if (!DEBUG_FORCE_ZOOM_OUT) return;
+  if (!camera || !controls) return;
+  const dir = camera.position.clone().sub(controls.target);
+  const dist = dir.length();
+  if (dist <= 0) return;
+  dir.normalize().multiplyScalar(dist * DEBUG_ZOOM_MULTIPLIER);
+  camera.position.copy(controls.target.clone().add(dir));
+  camera.updateProjectionMatrix();
+  requestRender();
+};
+
+const createPreviewObjectUrl = (blob) => URL.createObjectURL(blob);
+
+// Register capture function with asset manager (returns object URLs + blob)
+setCapturePreviewFn(async () => {
+  const payload = await capturePreviewBlob();
+  if (!payload) return null;
+  return {
+    ...payload,
+    url: createPreviewObjectUrl(payload.blob),
+    source: 'renderer',
+    updated: Date.now(),
+  };
+});
 
 /**
  * Applies a preview image as background immediately.
  * Used when loading an asset that already has a preview.
  */
-const applyPreviewAsBackground = (previewUrl) => {
-  if (!previewUrl) return;
-  setBgImageUrl(previewUrl);
-  updateBackgroundImage(previewUrl);
-  
-  // Apply glow effect to page container
-  const pageEl = document.querySelector(".page");
-  if (pageEl) {
-    pageEl.style.setProperty("--glow-image", `url(${previewUrl})`);
-    pageEl.classList.add("has-glow");
-  }
-  
-  // Make canvas transparent so background shows through
-  scene.background = null;
-  renderer.setClearColor(0x000000, 0);
-  
-  requestRender();
-};
-
-/**
- * Captures current render as blurred background image.
- * Creates depth effect behind the model and glow effect around the viewer.
- */
-const captureAndApplyBackground = () => {
-  if (!currentMesh) return;
-
-  // Set solid background for capture
-  scene.background = new THREE.Color("#0c1018");
-  renderer.setClearColor(0x0c1018, 1);
-  
-  composer.render();
-  
-  const dataUrl = renderer.domElement.toDataURL("image/jpeg", 0.9);
-  
-  setBgImageUrl(dataUrl);
-  updateBackgroundImage(dataUrl);
-  
-  // Apply glow effect to page container
-  const pageEl = document.querySelector(".page");
-  if (pageEl) {
-    pageEl.style.setProperty("--glow-image", `url(${dataUrl})`);
-    pageEl.classList.add("has-glow");
-  }
-  
-  // Set transparent background so blurred image shows through
-  scene.background = null;
-  renderer.setClearColor(0x000000, 0);
-  
-  requestRender();
-  getStoreState().addLog("Background captured from model render");
-};
+// Background helpers now centralized in backgroundManager
 
 /**
  * Formats byte count into human-readable string.
@@ -420,6 +469,8 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
   if (!asset) return;
   const hasFileOrSource = asset.file || (asset.sourceId && asset._remoteAsset);
   if (!hasFileOrSource) return;
+
+  await hydrateAssetPreviewFromStorage(asset);
 
   // Cancel any in-flight slide transitions before starting a new load
   // This prevents race conditions where previous animation state corrupts the new load
@@ -473,7 +524,7 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
   try {
     // Only clear background if not cached (avoid flash)
     if (!wasAlreadyCached) {
-      updateBackgroundImage(null);
+      clearBackground();
       const pageEl = document.querySelector(".page");
       if (pageEl) {
         pageEl.classList.remove("has-glow");
@@ -559,10 +610,6 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
       store.addLog(`Found stored settings for ${asset.name}`);
     }
 
-    if (storedSettings?.preview) {
-      applyPreviewAsBackground(storedSettings.preview);
-    }
-
     await syncStoredAnimationSettings(
       storedSettings?.animation,
       wasImmersiveModeActive,
@@ -619,6 +666,7 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
       }
 
       saveHomeView();
+      applyDebugZoomOut();
       
       // Slide in from the navigation direction (1s pan with quick fade-in)
       await slideInAnimation(slideDirection, { duration: 1000, amount: 0.5, mode: slideMode });
@@ -650,6 +698,7 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
         }
 
         saveHomeView();
+        applyDebugZoomOut();
       }, { animate: shouldAnimateCamera });
       
       if (shouldRunTransition) {
@@ -673,15 +722,17 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
       }
     }
 
-    // Apply preview immediately for cached splats
+    // Apply preview immediately for cached splats; clear if missing to avoid stale backgrounds
     if (asset.preview) {
       if (wasAlreadyCached) {
-        applyPreviewAsBackground(asset.preview);
+        applyPreviewBackground(asset.preview);
       } else {
         setTimeout(() => {
-          applyPreviewAsBackground(asset.preview);
+          applyPreviewBackground(asset.preview);
         }, 50);
       }
+    } else {
+      applyPreviewBackground(null);
     }
 
     // Use reduced warmup for cached splats
@@ -691,8 +742,6 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
 
     const skipBgGeneration = wasAlreadyCached || (asset.preview && asset.previewSource === "image");
 
-    const storedSettingsRef = storedSettings;
-
     const warmup = () => {
       if (warmupFrames > 0) {
         warmupFrames--;
@@ -701,27 +750,35 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
 
         if (!bgCaptured && warmupFrames === BG_CAPTURE_FRAME && !skipBgGeneration) {
           bgCaptured = true;
-          captureAndApplyBackground();
+          captureAndApplyBackground({ renderer, composer, scene, THREE });
         }
 
         const previewFrame = wasAlreadyCached ? PREVIEW_CAPTURE_FRAME_CACHED : PREVIEW_CAPTURE_FRAME;
         if (!previewCaptured && warmupFrames === previewFrame) {
           previewCaptured = true;
-          const shouldGeneratePreview = !storedSettingsRef?.preview;
+          const shouldGeneratePreview = !asset.preview || asset.previewSource === 'image';
 
           if (shouldGeneratePreview) {
-            captureCurrentAssetPreview();
-            const previewUrl = capturePreviewThumbnail();
-            if (previewUrl) {
-              const sizeKB = (previewUrl.length * 0.75 / 1024).toFixed(1);
-              store.addLog(`Preview saved (${sizeKB} KB)`);
-              // Use asset.name as key (works for both local files and source assets)
-              savePreviewImage(asset.name, previewUrl).catch((err) => {
-                console.warn('Failed to save preview:', err);
-              });
+            const capturePromise = captureCurrentAssetPreview();
+            if (capturePromise?.then) {
+              capturePromise
+                .then(async (previewResult) => {
+                  if (!previewResult?.blob) return;
+                  const sizeKB = (previewResult.blob.size / 1024).toFixed(1);
+                  store.addLog(`Preview saved (${sizeKB} KB, ${previewResult.format ?? 'image/webp'})`);
+                  await savePreviewBlob(asset.name, previewResult.blob, {
+                    width: previewResult.width,
+                    height: previewResult.height,
+                    format: previewResult.format,
+                  }).catch((err) => {
+                    console.warn('Failed to save preview:', err);
+                  });
+                })
+                .catch((err) => {
+                  console.warn('Preview capture failed', err);
+                });
             }
           } else {
-            captureCurrentAssetPreview();
             store.addLog('Using stored preview from IndexedDB');
           }
         }
@@ -934,13 +991,20 @@ export const handleMultipleFiles = async (files) => {
     store.addLog(`Found ${result.count} assets`);
     
     // Load stored previews from IndexedDB for all assets
-    const { loadFileSettings } = await import('./fileStorage.js');
     for (let i = 0; i < result.assets.length; i++) {
       const asset = result.assets[i];
-      const storedSettings = await loadFileSettings(asset.name);
-      if (storedSettings?.preview && !asset.preview) {
-        asset.preview = storedSettings.preview;
+      if (asset.preview) continue;
+      const storedPreview = await loadPreviewBlob(asset.name);
+      if (storedPreview?.blob) {
+        const objectUrl = URL.createObjectURL(storedPreview.blob);
+        replacePreviewUrl(asset, objectUrl);
         asset.previewSource = 'indexeddb';
+        asset.previewMeta = {
+          width: storedPreview.width,
+          height: storedPreview.height,
+          format: storedPreview.format,
+          updated: storedPreview.updated,
+        };
         store.updateAssetPreview(i, asset.preview);
       }
     }
@@ -984,18 +1048,23 @@ export const handleAddFiles = async (files) => {
   store.addLog(`Added ${result.added} assets`);
   
   // Load stored previews for new assets
-  const { loadFileSettings } = await import('./fileStorage.js');
-  
   const startIndex = allAssets.length - result.added;
   
   for (let i = 0; i < result.newAssets.length; i++) {
     const asset = result.newAssets[i];
     const globalIndex = startIndex + i;
-    
-    const storedSettings = await loadFileSettings(asset.name);
-    if (storedSettings?.preview && !asset.preview) {
-      asset.preview = storedSettings.preview;
+    if (asset.preview) continue;
+    const storedPreview = await loadPreviewBlob(asset.name);
+    if (storedPreview?.blob) {
+      const objectUrl = URL.createObjectURL(storedPreview.blob);
+      replacePreviewUrl(asset, objectUrl);
       asset.previewSource = 'indexeddb';
+      asset.previewMeta = {
+        width: storedPreview.width,
+        height: storedPreview.height,
+        format: storedPreview.format,
+        updated: storedPreview.updated,
+      };
       store.updateAssetPreview(globalIndex, asset.preview);
     }
   }
@@ -1067,7 +1136,7 @@ export const loadFromStorageSource = async (source) => {
     spark.update({ scene });
     
     // Clear background
-    updateBackgroundImage(null);
+    clearBackground();
     const pageEl = document.querySelector(".page");
     if (pageEl) {
       pageEl.classList.remove("has-glow");
@@ -1090,12 +1159,27 @@ export const loadFromStorageSource = async (source) => {
     const loadPreviews = async () => {
       for (let i = 0; i < result.assets.length; i++) {
         const asset = result.assets[i];
-        if (!asset.preview) {
-          const preview = await loadAssetPreview(asset);
-          if (preview) {
-            asset.preview = preview;
-            store.updateAssetPreview(i, preview);
-          }
+        if (asset.preview) continue;
+
+        const storedPreview = await loadPreviewBlob(asset.name);
+        if (storedPreview?.blob) {
+          const objectUrl = URL.createObjectURL(storedPreview.blob);
+          replacePreviewUrl(asset, objectUrl);
+          asset.previewSource = 'indexeddb';
+          asset.previewMeta = {
+            width: storedPreview.width,
+            height: storedPreview.height,
+            format: storedPreview.format,
+            updated: storedPreview.updated,
+          };
+          store.updateAssetPreview(i, asset.preview);
+          continue;
+        }
+
+        const preview = await loadAssetPreview(asset);
+        if (preview) {
+          replacePreviewUrl(asset, preview);
+          store.updateAssetPreview(i, asset.preview);
         }
       }
     };

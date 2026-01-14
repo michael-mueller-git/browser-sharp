@@ -12,7 +12,7 @@ import { StereoEffect } from "three/examples/jsm/effects/StereoEffect.js";
 
 // Scene
 export const scene = new THREE.Scene();
-scene.background = new THREE.Color("#0c1018");
+scene.background = null;
 
 // Renderer (initialized lazily)
 export let renderer;
@@ -96,6 +96,7 @@ export const initViewer = (viewerEl) => {
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setClearColor(0x000000, 0); // Transparent clear color
   viewerEl.appendChild(renderer.domElement);
 
   // Camera

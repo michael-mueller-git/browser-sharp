@@ -1,7 +1,7 @@
 const API_URL = import.meta.env.VITE_SHARP_API_URL;
 const API_KEY = import.meta.env.VITE_SHARP_API_KEY;
 
-export async function testSharpCloud(files, { prefix } = {}) {
+export async function testSharpCloud(files, { prefix, onProgress } = {}) {
   if (!API_URL || !API_KEY) {
     console.error("❌ Missing API config: set VITE_SHARP_API_URL and VITE_SHARP_API_KEY");
     return [];
@@ -14,6 +14,7 @@ export async function testSharpCloud(files, { prefix } = {}) {
 
   const uploads = Array.from(files);
   const results = [];
+  const total = uploads.length;
 
   for (const file of uploads) {
     console.log(`🚀 Uploading ${file.name}...`);
@@ -44,6 +45,10 @@ export async function testSharpCloud(files, { prefix } = {}) {
     } catch (err) {
       console.error(`❌ Upload failed for ${file.name}:`, err.message);
       results.push({ file: file.name, ok: false, error: err.message });
+    }
+
+    if (typeof onProgress === 'function') {
+      onProgress({ completed: results.length, total });
     }
   }
 

@@ -14,6 +14,9 @@ function TitleCard({
   onOpenStorage,
   onLoadDemo,
 }) {
+  // Keep the overlay mounted through fade-out; unmount after transition ends
+  const [mounted, setMounted] = useState(show);
+
   // Responsive mask height (tight mask on narrow screens)
   const [maskHeight, setMaskHeight] = useState(() => {
     if (typeof window === 'undefined') return 150;
@@ -39,6 +42,18 @@ function TitleCard({
   };
 
   useEffect(() => {
+    let unmountTimer;
+    if (show) {
+      setMounted(true);
+    } else {
+      unmountTimer = setTimeout(() => setMounted(false), 450);
+    }
+    return () => {
+      if (unmountTimer) clearTimeout(unmountTimer);
+    };
+  }, [show]);
+
+  useEffect(() => {
     if (!show) {
       setButtonsVisible(false);
       return undefined;
@@ -57,12 +72,15 @@ function TitleCard({
     };
   }, [show]);
 
-  if (!show) return null;
-
   const actionButtonsClass = `action-buttons ${buttonsVisible ? 'is-visible' : ''}`;
 
+  // Render always and let parent control visibility via CSS class to allow fade transitions
+  const overlayClass = `title-card-overlay ${show ? 'is-visible' : 'is-hidden'}`;
+
+  if (!mounted) return null;
+
   return (
-    <div class="title-card-overlay">
+    <div class={overlayClass} aria-hidden={!show}>
       <div class="title-card">
         <FrostedTitle
           backgroundImage="/neonstatic2.png"

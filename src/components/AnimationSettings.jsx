@@ -9,8 +9,12 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronDown, faRotateRight } from '@fortawesome/free-solid-svg-icons';
 import { useStore } from '../store';
 import { setLoadAnimationEnabled, setLoadAnimationIntensity, setLoadAnimationDirection, startLoadZoomAnimation } from '../cameraAnimations';
-import { saveAnimationSettings, savePreviewImage } from '../fileStorage';
+import { saveAnimationSettings, savePreviewBlob } from '../fileStorage';
 import { scene, renderer, composer, THREE, currentMesh } from '../viewer';
+
+const PREVIEW_TARGET_HEIGHT = 128;
+const PREVIEW_WEBP_QUALITY = 0.18;
+const PREVIEW_JPEG_QUALITY = 0.35;
 
 /** Animation style options with display labels */
 const INTENSITY_OPTIONS = [
@@ -125,25 +129,64 @@ function AnimationSettings() {
     setSlideModeStore(mode);
   }, [setSlideModeStore]);
 
+  const canvasToBlob = (canvas, type, quality) => new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob || null), type, quality);
+  });
+
+  const encodePreviewCanvas = async (canvas) => {
+    const webpBlob = await canvasToBlob(canvas, 'image/webp', PREVIEW_WEBP_QUALITY);
+    if (webpBlob) return { blob: webpBlob, format: 'image/webp' };
+
+    const jpegBlob = await canvasToBlob(canvas, 'image/jpeg', PREVIEW_JPEG_QUALITY);
+    if (jpegBlob) return { blob: jpegBlob, format: 'image/jpeg' };
+
+    try {
+      const dataUrl = canvas.toDataURL('image/jpeg', PREVIEW_JPEG_QUALITY);
+      const response = await fetch(dataUrl);
+      const blob = await response.blob();
+      return { blob, format: blob.type || 'image/jpeg', fallback: true };
+    } catch (err) {
+      console.warn('Preview encoding fallback failed', err);
+      return null;
+    }
+  };
+
   /**
-   * Captures a preview thumbnail of the current render.
-   * @returns {string|null} Data URL of captured image, or null if no mesh loaded
+   * Captures a downscaled preview blob of the current render.
    */
-  const capturePreviewThumbnail = () => {
+  const capturePreviewBlob = async () => {
     if (!currentMesh) return null;
-    
-    // Render with solid background for capture
-    scene.background = new THREE.Color("#0c1018");
+
+    const clearColor = new THREE.Color();
+    renderer.getClearColor(clearColor);
+    const clearAlpha = renderer.getClearAlpha();
+    const originalBackground = scene.background;
+
+    scene.background = new THREE.Color('#0c1018');
     renderer.setClearColor(0x0c1018, 1);
     composer.render();
-    
-    const dataUrl = renderer.domElement.toDataURL("image/jpeg", 0.85);
-    
-    // Restore transparent background
-    scene.background = null;
-    renderer.setClearColor(0x000000, 0);
-    
-    return dataUrl;
+
+    const sourceCanvas = renderer.domElement;
+    const scale = PREVIEW_TARGET_HEIGHT / Math.max(1, sourceCanvas.height);
+    const targetWidth = Math.max(1, Math.round(sourceCanvas.width * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = PREVIEW_TARGET_HEIGHT;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(sourceCanvas, 0, 0, targetWidth, PREVIEW_TARGET_HEIGHT);
+
+    const encoded = await encodePreviewCanvas(canvas);
+
+    scene.background = originalBackground;
+    renderer.setClearColor(clearColor, clearAlpha);
+
+    if (!encoded) return null;
+
+    return {
+      ...encoded,
+      width: targetWidth,
+      height: PREVIEW_TARGET_HEIGHT,
+    };
   };
 
   /**
@@ -160,14 +203,22 @@ function AnimationSettings() {
           if (frameCount < 30) {
             requestAnimationFrame(waitAndCapture);
           } else {
-            const previewUrl = capturePreviewThumbnail();
-            if (previewUrl && currentFileName && currentFileName !== '-') {
-              const sizeKB = (previewUrl.length * 0.75 / 1024).toFixed(1);
-              console.log(`Preview updated (${sizeKB} KB)`);
-              savePreviewImage(currentFileName, previewUrl).catch(err => {
-                console.warn('Failed to save preview:', err);
+            capturePreviewBlob()
+              ?.then((preview) => {
+                if (!preview || !currentFileName || currentFileName === '-') return;
+                const sizeKB = (preview.blob.size / 1024).toFixed(1);
+                console.log(`Preview updated (${sizeKB} KB, ${preview.format ?? 'image/webp'})`);
+                savePreviewBlob(currentFileName, preview.blob, {
+                  width: preview.width,
+                  height: preview.height,
+                  format: preview.format,
+                }).catch(err => {
+                  console.warn('Failed to save preview:', err);
+                });
+              })
+              .catch(err => {
+                console.warn('Failed to capture preview:', err);
               });
-            }
           }
         };
         requestAnimationFrame(waitAndCapture);
