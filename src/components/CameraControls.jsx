@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { useStore } from '../store';
-import { camera, controls, defaultCamera, defaultControls, dollyZoomBaseDistance, dollyZoomBaseFov, requestRender, THREE, setStereoEffectEnabled } from '../viewer';
+import { camera, controls, defaultCamera, defaultControls, dollyZoomBaseDistance, dollyZoomBaseFov, requestRender, THREE, setStereoEffectEnabled, setStereoEyeSeparation, setStereoAspect as setStereoAspectRatio, getFocusDistance, calculateOptimalEyeSeparation } from '../viewer';
 import { applyCameraRangeDegrees, restoreHomeView, resetViewWithImmersive } from '../cameraUtils';
 import { currentMesh, raycaster, SplatMesh, scene } from '../viewer';
 import { updateDollyZoomBaselineFromCamera } from '../viewer';
@@ -132,8 +132,13 @@ function CameraControls() {
   const setHasCustomFocus = useStore((state) => state.setHasCustomFocus);
   const stereoEnabled = useStore((state) => state.stereoEnabled);
   const setStereoEnabled = useStore((state) => state.setStereoEnabled);
+  const stereoEyeSep = useStore((state) => state.stereoEyeSep);
+  const setStereoEyeSep = useStore((state) => state.setStereoEyeSep);
+  const stereoAspect = useStore((state) => state.stereoAspect);
+  const setStereoAspect = useStore((state) => state.setStereoAspect);
   const vrSupported = useStore((state) => state.vrSupported);
   const vrSessionActive = useStore((state) => state.vrSessionActive);
+  const hasAssetLoaded = useStore((state) => state.fileInfo?.name && state.fileInfo.name !== '-');
 
   // Ref for camera range slider to avoid DOM queries
   const rangeSliderRef = useRef(null);
@@ -210,6 +215,14 @@ function CameraControls() {
 
     addLog(`Focus depth set: ${hitDistance.toFixed(2)} units`);
 
+    // Auto-update stereo eye separation if stereo mode is active
+    if (stereoEnabled) {
+      const optimal = calculateOptimalEyeSeparation(hitDistance);
+      setStereoEyeSep(optimal);
+      setStereoEyeSeparation(optimal);
+      addLog(`Auto eye separation: ${(optimal * 1000).toFixed(0)}mm`);
+    }
+
     // Persist focus distance for this file
     if (currentFileName && currentFileName !== '-') {
       saveFocusDistance(currentFileName, hitDistance).catch(err => {
@@ -227,7 +240,7 @@ function CameraControls() {
     setTimeout(() => {
       setFocusMode(hasCustomFocus ? FOCUS_MODE.CUSTOM : FOCUS_MODE.IDLE);
     }, 1500);
-  }, [addLog, currentFileName, hasCustomFocus, assets, currentAssetIndex]);
+  }, [addLog, currentFileName, hasCustomFocus, assets, currentAssetIndex, stereoEnabled, setStereoEyeSep]);
 
   /**
    * Activates focus-setting mode.
@@ -630,6 +643,82 @@ function CameraControls() {
             <span class="switch-track" aria-hidden="true" />
           </label>
         </div>
+
+        {/* VR button - shown when VR is supported and an asset is loaded */}
+        {vrSupported && hasAssetLoaded && (
+          <div class="control-row">
+            <button
+              class={`secondary enter-vr-btn ${vrSessionActive ? 'vr-active' : ''}`}
+              onClick={() => {
+                enterVrSession();
+              }}
+            >
+              {vrSessionActive ? 'Exit VR' : 'Enter VR'}
+            </button>
+          </div>
+        )}
+
+        {/* Eye separation slider - shown when stereo is enabled */}
+        {stereoEnabled && (
+          <>
+            <div class="control-row">
+              <span class="control-label">Eye separation</span>
+              <div class="control-track">
+                <input
+                  type="range"
+                  min="0.01"
+                  max="0.60"
+                  step="0.005"
+                  value={stereoEyeSep}
+                  onInput={(e) => {
+                    const value = parseFloat(e.target.value);
+                    setStereoEyeSep(value);
+                    setStereoEyeSeparation(value);
+                  }}
+                />
+                <span class="control-value">
+                  {(stereoEyeSep * 1000).toFixed(0)}mm
+                </span>
+                <button
+                  class="auto-btn"
+                  title="Calculate optimal separation from focus distance"
+                  onClick={() => {
+                    const focusDist = getFocusDistance();
+                    if (focusDist) {
+                      const optimal = calculateOptimalEyeSeparation(focusDist);
+                      setStereoEyeSep(optimal);
+                      setStereoEyeSeparation(optimal);
+                      addLog(`Auto eye separation: ${(optimal * 1000).toFixed(0)}mm (from ${focusDist.toFixed(2)} units)`);
+                    }
+                  }}
+                >
+                  Auto
+                </button>
+              </div>
+            </div>
+            
+            <div class="control-row">
+              <span class="control-label">Stereo aspect</span>
+              <div class="control-track">
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2.0"
+                  step="0.05"
+                  value={stereoAspect}
+                  onInput={(e) => {
+                    const value = parseFloat(e.target.value);
+                    setStereoAspect(value);
+                    setStereoAspectRatio(value);
+                  }}
+                />
+                <span class="control-value">
+                  {stereoAspect.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </>
+        )}
 
         <div class="control-row camera-range-controls">
           <span class="control-label">Orbit range</span>

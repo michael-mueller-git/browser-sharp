@@ -4,7 +4,7 @@ import useSwipe from '../utils/useSwipe';
 import { useStore } from '../store';
 import { loadAssetByIndex, handleAddFiles } from '../fileLoader';
 import { removeAsset, clearAssets, getAssetList, getCurrentAssetIndex } from '../assetManager';
-import { deleteFileSettings, clearAllFileSettings } from '../fileStorage';
+import { deleteFileSettings, clearAllFileSettings, loadPreviewBlob } from '../fileStorage';
 import { getFormatAccept } from '../formats/index';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faTrash } from '@fortawesome/free-solid-svg-icons';
@@ -15,6 +15,7 @@ function AssetSidebar() {
   const currentAssetIndex = useStore((state) => state.currentAssetIndex);
   const setAssets = useStore((state) => state.setAssets);
   const setCurrentAssetIndex = useStore((state) => state.setCurrentAssetIndex);
+  const updateAssetPreview = useStore((state) => state.updateAssetPreview);
 
   const isVisible = useStore((state) => state.assetSidebarOpen);
   const setIsVisible = useStore((state) => state.setAssetSidebarOpen);
@@ -23,11 +24,13 @@ function AssetSidebar() {
   const [deleteScope, setDeleteScope] = useState('single'); // 'single' or 'all'
   const [clearMetadata, setClearMetadata] = useState(false);
   const [deleteRemote, setDeleteRemote] = useState(false);
+  const [brokenPreviews, setBrokenPreviews] = useState(new Set()); // Track broken preview indices
   const sidebarRef = useRef(null);
   const fileInputRef = useRef(null);
   const hoverTargetRef = useRef(null);
   const openedByHoverRef = useRef(false);
   const hideTimeoutRef = useRef(null);
+  const repairingRef = useRef(new Set()); // Track indices being repaired
 
   const formatAccept = getFormatAccept();
 
@@ -132,6 +135,87 @@ function AssetSidebar() {
       hideTimeoutRef.current = null;
     }, 500);
   }, [clearHideTimeout]);
+
+  /**
+   * Attempts to repair a broken preview by reloading from IndexedDB
+   */
+  const tryRepairPreview = useCallback(async (index, asset) => {
+    if (repairingRef.current.has(index)) {
+      console.log(`[AssetSidebar] Already repairing preview for index ${index}, skipping`);
+      return;
+    }
+    
+    repairingRef.current.add(index);
+    console.log(`[AssetSidebar] Attempting to repair broken preview for "${asset.name}" (index ${index})`);
+    console.log(`[AssetSidebar] Current preview URL:`, asset.preview?.substring?.(0, 60));
+    
+    try {
+      const storedPreview = await loadPreviewBlob(asset.name);
+      if (storedPreview?.blob) {
+        const objectUrl = URL.createObjectURL(storedPreview.blob);
+        console.log(`[AssetSidebar] Found stored preview in IndexedDB, created URL: ${objectUrl.substring(0, 50)}...`);
+        
+        // Update the asset manager's internal list
+        const assetList = getAssetList();
+        if (assetList[index]) {
+          assetList[index].preview = objectUrl;
+          assetList[index].previewSource = 'indexeddb-repair';
+        }
+        
+        // Update the store
+        updateAssetPreview(index, objectUrl);
+        
+        // Remove from broken set
+        setBrokenPreviews(prev => {
+          const next = new Set(prev);
+          next.delete(index);
+          return next;
+        });
+        
+        console.log(`[AssetSidebar] Preview repaired successfully for "${asset.name}"`);
+      } else {
+        console.log(`[AssetSidebar] No stored preview found in IndexedDB for "${asset.name}"`);
+      }
+    } catch (err) {
+      console.warn(`[AssetSidebar] Failed to repair preview for "${asset.name}":`, err);
+    } finally {
+      repairingRef.current.delete(index);
+    }
+  }, [updateAssetPreview]);
+
+  /**
+   * Handle image load error - mark as broken and attempt repair
+   */
+  const handleImageError = useCallback((index, asset) => {
+    console.log(`[AssetSidebar] Image load ERROR for index ${index}: "${asset.name}"`, {
+      previewUrl: asset.preview?.substring?.(0, 60),
+      previewSource: asset.previewSource
+    });
+    
+    setBrokenPreviews(prev => new Set(prev).add(index));
+    tryRepairPreview(index, asset);
+  }, [tryRepairPreview]);
+
+  /**
+   * Handle successful image load
+   */
+  const handleImageLoad = useCallback((index, asset) => {
+    console.log(`[AssetSidebar] Image loaded OK for index ${index}: "${asset.name}"`);
+    setBrokenPreviews(prev => {
+      if (prev.has(index)) {
+        const next = new Set(prev);
+        next.delete(index);
+        return next;
+      }
+      return prev;
+    });
+  }, []);
+
+  // Reset broken previews when assets change (new collection loaded)
+  useEffect(() => {
+    setBrokenPreviews(new Set());
+    repairingRef.current.clear();
+  }, [assets]);
 
   const syncAssets = () => {
     const newAssets = getAssetList();
@@ -251,9 +335,15 @@ function AssetSidebar() {
               title={asset.name}
               onClick={() => loadAssetByIndex(index)}
             >
-              <div class={`asset-preview ${asset.preview ? '' : 'loading'}`}>
+              <div class={`asset-preview ${asset.preview && !brokenPreviews.has(index) ? '' : 'loading'}`}>
                 {asset.preview ? (
-                  <img src={asset.preview} alt={asset.name} loading="lazy" />
+                  <img 
+                    src={asset.preview} 
+                    alt={asset.name} 
+                    loading="lazy"
+                    onError={() => handleImageError(index, asset)}
+                    onLoad={() => handleImageLoad(index, asset)}
+                  />
                 ) : (
                   <div class="preview-spinner" />
                 )}

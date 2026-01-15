@@ -7,6 +7,7 @@ import { useRef, useCallback, useState } from 'preact/hooks';
 import useSwipe from '../utils/useSwipe';
 import { useStore } from '../store';
 import CameraControls from './CameraControls';
+import DebugSettings from './DebugSettings';
 import AnimationSettings from './AnimationSettings';
 import StorageSourceList from './StorageSourceList';
 import ConnectStorageDialog from './ConnectStorageDialog';
@@ -105,6 +106,8 @@ function MobileSheet() {
           onAddSource={handleOpenStorageDialog}
           onSelectSource={handleSelectSource}
         />
+                <DebugSettings />
+
         {/* <AssetGallery /> */}
       </div>
 

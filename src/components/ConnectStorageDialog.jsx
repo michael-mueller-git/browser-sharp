@@ -432,7 +432,7 @@ function ExistingCollectionItem({ collection, onSelect, isLoading, selected }) {
   );
 }
 
-function SupabaseForm({ onConnect, onBack }) {
+function SupabaseForm({ onConnect, onBack, onClose }) {
   const supportedExtensions = useMemo(() => getSupportedExtensions(), []);
   const queuedAssets = useMemo(() => getAssetList(), []);
   const queueFiles = useMemo(() => {
@@ -537,6 +537,39 @@ function SupabaseForm({ onConnect, onBack }) {
   }, []);
 
   const handleConnectSelected = useCallback(async () => {
+    if (!selectedExisting) return;
+
+    setStatus('connecting');
+    setError(null);
+
+    try {
+      const source = createSupabaseStorageSource({
+        supabaseUrl: supabaseUrl.trim(),
+        anonKey: anonKey.trim(),
+        bucket: bucket.trim(),
+        collectionId: selectedExisting.id,
+        collectionName: selectedExisting.name,
+      });
+
+      const result = await source.connect({ refreshManifest: true });
+
+      if (result.success) {
+        setHasManifest(source.config.config.hasManifest);
+        registerSource(source);
+        await saveSource(source.toJSON());
+        setStatus('success');
+        setTimeout(() => onClose?.(), 500);
+      } else {
+        setError(result.error || 'Failed to connect');
+        setStatus('error');
+      }
+    } catch (err) {
+      setError(err.message);
+      setStatus('error');
+    }
+  }, [supabaseUrl, anonKey, bucket, onClose, selectedExisting]);
+
+  const handleConnectAndSwitch = useCallback(async () => {
     if (!selectedExisting) return;
 
     setStatus('connecting');
@@ -846,7 +879,7 @@ function SupabaseForm({ onConnect, onBack }) {
             <button
               class="secondary-button"
               style={{marginTop: "0px"}}
-              onClick={() => setSelectedExisting(null)}
+              onClick={handleConnectAndSwitch}
               disabled={status === 'connecting'}
             >
               Switch to new collection
@@ -1017,7 +1050,7 @@ function ConnectStorageDialog({ isOpen, onClose, onConnect, editSource, onEditCo
         ) : selectedTier === 'local-folder' ? (
           <LocalFolderForm onConnect={handleConnect} onBack={handleBack} />
         ) : selectedTier === 'supabase-storage' ? (
-          <SupabaseForm onConnect={handleConnect} onBack={handleBack} />
+          <SupabaseForm onConnect={handleConnect} onBack={handleBack} onClose={handleClose} />
         ) : selectedTier === 'public-url' ? (
           <UrlCollectionForm 
             onConnect={handleConnect} 

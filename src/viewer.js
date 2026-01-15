@@ -8,7 +8,6 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import { StereoEffect } from "three/examples/jsm/effects/StereoEffect.js";
 
 // Scene
 export const scene = new THREE.Scene();
@@ -23,7 +22,7 @@ export let camera;
 export let controls;
 export let spark;
 export let raycaster;
-export let stereoEffect;
+export let stereoCamera;
 
 // Default settings (captured after initialization)
 export let defaultCamera;
@@ -56,17 +55,92 @@ export const setOriginalImageAspect = (aspect) => { originalImageAspect = aspect
 export const setDollyZoomEnabled = (enabled) => { dollyZoomEnabled = enabled; };
 export const setBgImageUrl = (url) => { bgImageUrl = url; };
 
-const ensureStereoEffect = () => {
-  if (stereoEffect || !renderer) return;
-  stereoEffect = new StereoEffect(renderer);
+const ensureStereoCamera = () => {
+  if (stereoCamera) return;
+  stereoCamera = new THREE.StereoCamera();
+  stereoCamera.aspect = 0.5; // Default for side-by-side (each eye gets half width)
 };
 
 export const setStereoEffectEnabled = (enabled) => {
   stereoEnabled = enabled;
   if (enabled) {
-    ensureStereoEffect();
+    ensureStereoCamera();
   }
   requestRender();
+};
+
+export const setStereoEyeSeparation = (eyeSep) => {
+  if (stereoCamera) {
+    stereoCamera.eyeSep = eyeSep;
+    requestRender();
+  }
+};
+
+export const setStereoAspect = (aspect) => {
+  if (stereoCamera) {
+    stereoCamera.aspect = aspect;
+    requestRender();
+  }
+};
+
+/**
+ * Gets the current focus distance (camera to orbit target distance).
+ * @returns {number|null} Distance in scene units, or null if not available
+ */
+export const getFocusDistance = () => {
+  if (!camera || !controls) return null;
+  return camera.position.distanceTo(controls.target);
+};
+
+/**
+ * Calculates optimal stereo eye separation based on focus distance.
+ * Uses a ratio of approximately 1/20 of the focus distance, which provides
+ * noticeable stereo depth while remaining comfortable.
+ * @param {number} focusDistance - The distance to the focal point
+ * @param {number} [ratio=0.05] - Separation ratio (default ~1/20)
+ * @returns {number} Optimal eye separation in scene units
+ */
+export const calculateOptimalEyeSeparation = (focusDistance, ratio = 0.05) => {
+  // Clamp to reasonable bounds (10mm to 600mm in scene units where 1 unit ≈ 1m)
+  const minSep = 0.01;
+  const maxSep = 0.6;
+  const calculated = focusDistance * ratio;
+  return Math.max(minSep, Math.min(maxSep, calculated));
+};
+
+/** 
+ * Renders scene in side-by-side stereo using StereoCamera directly.
+ * This gives us access to the aspect property for VR compatibility.
+ */
+const renderStereo = () => {
+  if (!renderer || !camera || !stereoCamera) return;
+
+  // Update scene matrices
+  if (scene.matrixWorldAutoUpdate === true) scene.updateMatrixWorld();
+  if (camera.parent === null && camera.matrixWorldAutoUpdate === true) camera.updateMatrixWorld();
+
+  // Update stereo camera from main camera
+  stereoCamera.update(camera);
+
+  const size = renderer.getSize(new THREE.Vector2());
+  const currentAutoClear = renderer.autoClear;
+
+  renderer.autoClear = false;
+  renderer.clear();
+  renderer.setScissorTest(true);
+
+  // Render left eye
+  renderer.setScissor(0, 0, size.width / 2, size.height);
+  renderer.setViewport(0, 0, size.width / 2, size.height);
+  renderer.render(scene, stereoCamera.cameraL);
+
+  // Render right eye
+  renderer.setScissor(size.width / 2, 0, size.width / 2, size.height);
+  renderer.setViewport(size.width / 2, 0, size.width / 2, size.height);
+  renderer.render(scene, stereoCamera.cameraR);
+
+  renderer.setScissorTest(false);
+  renderer.autoClear = currentAutoClear;
 };
 
 export const requestRender = () => {
@@ -218,8 +292,8 @@ export const startRenderLoop = () => {
     const controlsNeedUpdate = controls.update();
 
     if (needsRender || controlsNeedUpdate) {
-      if (stereoEnabled && stereoEffect) {
-        stereoEffect.render(scene, camera);
+      if (stereoEnabled && stereoCamera) {
+        renderStereo();
       } else {
         composer.render();
       }

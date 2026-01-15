@@ -7,6 +7,8 @@ import { useCallback, useEffect, useState } from 'preact/hooks';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronDown } from '@fortawesome/free-solid-svg-icons';
 import { useStore } from '../store';
+import { captureCurrentAssetPreview, getAssetList, getCurrentAssetIndex } from '../assetManager';
+import { savePreviewBlob } from '../fileStorage';
 
 let erudaInitPromise = null;
 
@@ -53,8 +55,11 @@ function DebugSettings() {
   const setMobileDevtoolsEnabled = useStore((state) => state.setMobileDevtoolsEnabled);
   const debugSettingsExpanded = useStore((state) => state.debugSettingsExpanded);
   const toggleDebugSettingsExpanded = useStore((state) => state.toggleDebugSettingsExpanded);
+  const updateAssetPreview = useStore((state) => state.updateAssetPreview);
+  const addLog = useStore((state) => state.addLog);
 
   const [wipingDb, setWipingDb] = useState(false);
+  const [generatingPreview, setGeneratingPreview] = useState(false);
 
   /** Toggle FPS overlay visibility */
   const handleFpsToggle = useCallback((e) => {
@@ -92,6 +97,64 @@ function DebugSettings() {
       setWipingDb(false);
     }
   }, []);
+
+  /** Debug: force regenerate preview for current asset */
+  const handleRegeneratePreview = useCallback(async () => {
+    setGeneratingPreview(true);
+    try {
+      const currentIndex = getCurrentAssetIndex();
+      const assetList = getAssetList();
+      const asset = assetList[currentIndex];
+      
+      if (!asset) {
+        addLog('[Debug] No current asset to capture preview for');
+        return;
+      }
+      
+      addLog(`[Debug] Capturing preview for asset index ${currentIndex}: ${asset.name}`);
+      console.log('[Debug] Asset before capture:', { 
+        id: asset.id, 
+        name: asset.name, 
+        preview: asset.preview,
+        previewSource: asset.previewSource 
+      });
+      
+      const result = await captureCurrentAssetPreview();
+      
+      console.log('[Debug] Capture result:', result);
+      console.log('[Debug] Asset after capture:', { 
+        id: asset.id, 
+        name: asset.name, 
+        preview: asset.preview,
+        previewSource: asset.previewSource 
+      });
+      
+      if (result?.url) {
+        addLog(`[Debug] Preview captured: ${result.url.substring(0, 50)}...`);
+        
+        // Force update the store directly
+        console.log('[Debug] Calling updateAssetPreview with index:', currentIndex, 'preview:', asset.preview);
+        updateAssetPreview(currentIndex, asset.preview);
+        
+        // Also save to IndexedDB
+        if (result.blob) {
+          await savePreviewBlob(asset.name, result.blob, {
+            width: result.width,
+            height: result.height,
+            format: result.format,
+          });
+          addLog(`[Debug] Preview saved to IndexedDB`);
+        }
+      } else {
+        addLog('[Debug] Preview capture returned no result');
+      }
+    } catch (err) {
+      console.error('[Debug] Preview regeneration failed:', err);
+      addLog(`[Debug] Preview failed: ${err.message}`);
+    } finally {
+      setGeneratingPreview(false);
+    }
+  }, [addLog, updateAssetPreview]);
 
   // React to devtools preference changes
   useEffect(() => {
@@ -153,6 +216,18 @@ function DebugSettings() {
             disabled={wipingDb}
           >
             {wipingDb ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
+
+        <div class="control-row">
+          <span class="control-label">Regen preview</span>
+          <button
+            type="button"
+            class={`secondary ${generatingPreview ? 'is-busy' : ''}`}
+            onClick={handleRegeneratePreview}
+            disabled={generatingPreview}
+          >
+            {generatingPreview ? 'Capturing...' : 'Capture'}
           </button>
         </div>
       </div>

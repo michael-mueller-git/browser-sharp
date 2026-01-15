@@ -86,12 +86,12 @@ function SidePanel() {
         {/* Settings panels */}
         <CameraControls />
         <AnimationSettings />
-        <DebugSettings />
         {/* Storage sources */}
         <StorageSourceList 
           onAddSource={handleOpenStorageDialog}
           onSelectSource={handleSelectSource}
         />
+        <DebugSettings />
       </div>
       
       {/* Connect to Storage dialog */}

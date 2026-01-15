@@ -425,6 +425,10 @@ const handleSessionEnd = () => {
     window.removeEventListener("keydown", handleScaleKeydown);
     keyListenerAttached = false;
   }
+  
+  // Restore camera to home view after VR session
+  restoreHomeView();
+  
   resumeRenderLoop();
   requestRender();
   store.setVrSessionActive(false);
@@ -467,8 +471,9 @@ export const initVrSupport = async (containerEl) => {
     return null;
   }
 
+  // Do NOT append to DOM - the button auto-shows itself when VR is supported.
+  // Keep it detached and just click it programmatically via enterVrSession().
   vrButton.style.display = "none";
-  (containerEl ?? document.body)?.appendChild(vrButton);
   attachSessionListeners();
   store.setVrSupported(true);
   return vrButton;
@@ -476,6 +481,19 @@ export const initVrSupport = async (containerEl) => {
 
 export const enterVrSession = async () => {
   const store = useStore.getState();
+  
+  // If already in a VR session, exit it
+  const currentSession = renderer?.xr?.getSession?.();
+  if (currentSession) {
+    try {
+      await currentSession.end();
+    } catch (err) {
+      console.warn("Failed to end VR session:", err);
+    }
+    return true;
+  }
+  
+  // Otherwise, start a new session
   const viewer = document.getElementById("viewer");
   const button = vrButton || await initVrSupport(viewer);
   if (!button) {

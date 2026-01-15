@@ -52,6 +52,8 @@ export const useStore = create((set, get) => ({
   cameraRange: 8,
   dollyZoomEnabled: true,
   stereoEnabled: false,
+  stereoEyeSep: 0.064,
+  stereoAspect: 1.0,
   vrSupported: false,
   vrSessionActive: false,
   vrModelScale: 1,
@@ -128,6 +130,12 @@ export const useStore = create((set, get) => ({
 
   /** Enables/disables side-by-side stereo rendering */
   setStereoEnabled: (enabled) => set({ stereoEnabled: enabled }),
+
+  /** Sets stereo eye separation distance */
+  setStereoEyeSep: (eyeSep) => set({ stereoEyeSep: eyeSep }),
+
+  /** Sets stereo aspect ratio */
+  setStereoAspect: (aspect) => set({ stereoAspect: aspect }),
 
   /** Marks whether WebXR/VR is available */
   setVrSupported: (vrSupported) => set({ vrSupported }),

@@ -18,7 +18,6 @@ import {
   setOriginalImageAspect,
   originalImageAspect,
   activeCamera,
-  stereoEffect,
   requestRender,
   THREE,
 } from "./viewer.js";
@@ -38,6 +37,9 @@ import { isImmersiveModeActive, pauseImmersiveMode, resumeImmersiveMode } from "
 
 /** Navigation lock to prevent concurrent asset loads */
 let isNavigationLocked = false;
+
+/** Track if this is the very first asset load (no previous mesh) */
+let hasLoadedFirstAsset = false;
 
 /** Cleanup function for any in-flight animation state */
 const cleanupSlideTransitionState = () => {
@@ -329,9 +331,6 @@ export const resize = () => {
   updateViewerAspectRatio();
   const { clientWidth, clientHeight } = viewerEl;
   renderer.setSize(clientWidth, clientHeight, false);
-  if (stereoEffect) {
-    stereoEffect.setSize(clientWidth, clientHeight);
-  }
 //   composer.setSize(clientWidth, clientHeight);
   
   if (activeCamera) {
@@ -479,11 +478,18 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
   const store = getStoreState();
   const { slideDirection } = options;
   const immersiveActive = isImmersiveModeActive();
+  const isFirstLoad = !hasLoadedFirstAsset; // Detect first asset load before any mesh exists
   const forceFadeForNonSequential = !slideDirection; // random asset clicks should use fade transition
   const slideMode = (immersiveActive || forceFadeForNonSequential)
     ? 'fade'
     : (store.slideMode ?? 'horizontal');
   const wasAlreadyCached = isSplatCached(asset);
+
+  // For first load, immediately hide content to prevent flash before fade-in
+  // This must happen BEFORE any async work that might cause a render
+  if (isFirstLoad) {
+    viewerEl.classList.add('slide-out');
+  }
 
   // Preload entry early (reused later to avoid duplicate loads)
   const entryPromise = ensureSplatEntry(asset);
@@ -637,11 +643,23 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
       setOriginalImageAspect(null);
     }
 
+    // slide-out class was already added at the start of loadSplatFile for first load
+
     if (aspectApplied) {
       await waitForViewerResizeTransition();
     }
 
     updateViewerAspectRatio();
+
+    // For first load, wait for aspect ratio transition then prepare for fade-in
+    if (isFirstLoad) {
+      // Wait for the CSS resize transition to complete
+      await waitForViewerResizeTransition();
+      // Resize renderer to match new viewer dimensions
+      resize();
+      hasLoadedFirstAsset = true;
+    }
+
     clearMetadataCamera(resize);
 
     // For slide transitions on cached splats, apply camera instantly then slide in
@@ -677,7 +695,9 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
         viewerEl.classList.remove('slide-out', 'slide-in');
       }
     } else {
-      const shouldAnimateCamera = !wasImmersiveModeActive && store.animationEnabled;
+      // For first load, skip camera animation entirely - just fade in
+      // For subsequent loads, use the configured animation
+      const shouldAnimateCamera = !isFirstLoad && !wasImmersiveModeActive && store.animationEnabled;
 
       await animateCameraMutation(() => {
         if (cameraMetadata) {
@@ -719,6 +739,17 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
             viewerEl.classList.remove('slide-in');
           }, 550);
         }
+      } else if (isFirstLoad) {
+        // First load: fade-in after aspect ratio transition completed
+        // Content was hidden with slide-out class during resize
+        const viewerEl = document.getElementById('viewer');
+        if (viewerEl) {
+          viewerEl.classList.remove('slide-out');
+          viewerEl.classList.add('slide-in');
+          setTimeout(() => {
+            viewerEl.classList.remove('slide-in');
+          }, 500);
+        }
       }
     }
 
@@ -749,14 +780,23 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
         requestAnimationFrame(warmup);
 
         if (!bgCaptured && warmupFrames === BG_CAPTURE_FRAME && !skipBgGeneration) {
-          bgCaptured = true;
-          captureAndApplyBackground({ renderer, composer, scene, THREE });
+          // Also skip background capture in VR/stereo mode
+          const bgStoreState = getStoreState();
+          const isDistortedBg = bgStoreState.stereoEnabled || bgStoreState.vrSessionActive;
+          if (!isDistortedBg) {
+            bgCaptured = true;
+            captureAndApplyBackground({ renderer, composer, scene, THREE });
+          }
         }
 
         const previewFrame = wasAlreadyCached ? PREVIEW_CAPTURE_FRAME_CACHED : PREVIEW_CAPTURE_FRAME;
         if (!previewCaptured && warmupFrames === previewFrame) {
           previewCaptured = true;
-          const shouldGeneratePreview = !asset.preview || asset.previewSource === 'image';
+          
+          // Skip preview capture if VR or stereo mode is active (would produce distorted preview)
+          const currentStoreState = getStoreState();
+          const isDistortedMode = currentStoreState.stereoEnabled || currentStoreState.vrSessionActive;
+          const shouldGeneratePreview = !isDistortedMode && (!asset.preview || asset.previewSource === 'image');
 
           if (shouldGeneratePreview) {
             const capturePromise = captureCurrentAssetPreview();
@@ -766,6 +806,13 @@ export const loadSplatFile = async (assetOrFile, options = {}) => {
                   if (!previewResult?.blob) return;
                   const sizeKB = (previewResult.blob.size / 1024).toFixed(1);
                   store.addLog(`Preview saved (${sizeKB} KB, ${previewResult.format ?? 'image/webp'})`);
+                  
+                  // Sync the captured preview to the store for gallery display
+                  const assetIndex = getAssetList().findIndex((a) => a.id === asset.id);
+                  if (assetIndex >= 0 && asset.preview) {
+                    store.updateAssetPreview(assetIndex, asset.preview);
+                  }
+                  
                   await savePreviewBlob(asset.name, previewResult.blob, {
                     width: previewResult.width,
                     height: previewResult.height,
@@ -976,6 +1023,7 @@ export const handleMultipleFiles = async (files) => {
   
   resetSplatManager();
   setCurrentMesh(null);
+  hasLoadedFirstAsset = false; // Reset first load flag for new asset list
   spark.update({ scene });
 
   // Update store with assets
@@ -983,9 +1031,32 @@ export const handleMultipleFiles = async (files) => {
   
   if (result.count === 1) {
     // Single file - load directly
+    // First, hydrate preview from storage (same as multi-file branch)
+    const asset = result.assets[0];
+    if (!asset.preview) {
+      const storedPreview = await loadPreviewBlob(asset.name);
+      if (storedPreview?.blob) {
+        const objectUrl = URL.createObjectURL(storedPreview.blob);
+        replacePreviewUrl(asset, objectUrl);
+        asset.previewSource = 'indexeddb';
+        asset.previewMeta = {
+          width: storedPreview.width,
+          height: storedPreview.height,
+          format: storedPreview.format,
+          updated: storedPreview.updated,
+        };
+        store.updateAssetPreview(0, asset.preview);
+      }
+    }
+    
+    // Set up preview generation callback (same as multi-file branch)
+    onPreviewGenerated((asset, index) => {
+      store.updateAssetPreview(index, asset.preview);
+    });
+    
     setCurrentAssetIndexManager(0);
     store.setCurrentAssetIndex(0);
-    await loadSplatFile(result.assets[0]);
+    await loadSplatFile(asset);
   } else {
     // Multiple files - show gallery and start loading
     store.addLog(`Found ${result.count} assets`);
@@ -1133,6 +1204,7 @@ export const loadFromStorageSource = async (source) => {
     // Reset current state
     resetSplatManager();
     setCurrentMesh(null);
+    hasLoadedFirstAsset = false; // Reset first load flag for new source
     spark.update({ scene });
     
     // Clear background

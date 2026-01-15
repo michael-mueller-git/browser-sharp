@@ -80,7 +80,7 @@ function TitleCard({
   if (!mounted) return null;
 
   return (
-    <div class={overlayClass} aria-hidden={!show}>
+    <div class={overlayClass} inert={!show ? '' : undefined}>
       <div class="title-card">
         <FrostedTitle
           backgroundImage="/neonstatic2.png"
