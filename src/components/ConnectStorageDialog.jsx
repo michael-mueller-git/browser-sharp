@@ -15,8 +15,11 @@ import {
   faSpinner,
   faExclamationTriangle,
   faChevronRight,
+  faChevronDown,
   faPlus,
   faLink,
+  faQuestion,
+  faFolderOpen,
 } from '@fortawesome/free-solid-svg-icons';
 import {
   SOURCE_TIERS,
@@ -28,6 +31,7 @@ import {
   saveSource,
 } from '../storage/index.js';
 import { loadSupabaseSettings, saveSupabaseSettings } from '../storage/supabaseSettings.js';
+import { listExistingCollections, testBucketConnection } from '../storage/supabaseApi.js';
 import { getAssetList } from '../assetManager.js';
 import { getSupportedExtensions } from '../formats/index.js';
 
@@ -53,7 +57,7 @@ function TierCard({ type, selected, onSelect, disabled }) {
       <div class="tier-content">
         <div class="tier-header">
           <h4>{info.label}</h4>
-          {info.tier === 3 && <span class="tier-badge">Recommended</span>}
+          {/* {info.tier === 3 && <span class="tier-badge">Recommended</span>} */}
         </div>
         <p class="tier-description">{info.description}</p>
         {disabled && (
@@ -165,11 +169,28 @@ function LocalFolderForm({ onConnect, onBack }) {
   );
 }
 
-function UrlCollectionForm({ onConnect, onBack }) {
-  const [urls, setUrls] = useState(['']);
-  const [collectionName, setCollectionName] = useState('');
+function UrlCollectionForm({ onConnect, onBack, initialSource, editMode = false, onSaveEdit }) {
+  const initialUrls = useMemo(() => {
+    if (editMode && initialSource?.config?.config?.assetPaths?.length) {
+      return [...initialSource.config.config.assetPaths];
+    }
+    return [''];
+  }, [editMode, initialSource]);
+  const [urls, setUrls] = useState(initialUrls);
+  const [collectionName, setCollectionName] = useState(
+    editMode ? (initialSource?.name || initialSource?.config?.name || '') : ''
+  );
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (editMode && initialSource) {
+      setUrls(initialSource?.config?.config?.assetPaths?.length ? [...initialSource.config.config.assetPaths] : ['']);
+      setCollectionName(initialSource?.name || initialSource?.config?.name || '');
+      setStatus('idle');
+      setError(null);
+    }
+  }, [editMode, initialSource]);
 
   const updateUrl = useCallback((index, value) => {
     setUrls((prev) => prev.map((u, i) => (i === index ? value : u)));
@@ -222,6 +243,25 @@ function UrlCollectionForm({ onConnect, onBack }) {
     setError(null);
 
     try {
+      if (editMode && initialSource) {
+        const updatedName = collectionName.trim() || initialSource.name;
+        initialSource.name = updatedName;
+        initialSource.config.name = updatedName;
+        initialSource.config.config.assetPaths = cleaned;
+        initialSource.config.config.customName = Boolean(collectionName.trim());
+
+        await saveSource(initialSource.toJSON());
+        registerSource(initialSource);
+        await initialSource.listAssets();
+
+        setStatus('success');
+        const finish = onSaveEdit || onConnect;
+        if (finish) {
+          setTimeout(() => finish(initialSource), 300);
+        }
+        return;
+      }
+
       const source = createPublicUrlSource({
         assetPaths: cleaned,
         name: collectionName.trim() || 'URL collection',
@@ -242,16 +282,17 @@ function UrlCollectionForm({ onConnect, onBack }) {
       setError(err.message);
       setStatus('error');
     }
-  }, [urls, collectionName, onConnect]);
+  }, [urls, collectionName, onConnect, editMode, initialSource, onSaveEdit]);
 
   return (
     <div class="storage-form">
-      <button class="back-button" onClick={onBack}>
-        {'Back'}
-      </button>
+      {!editMode && (
+        <button class="back-button" onClick={onBack}>
+          {'Back'}
+        </button>
+      )}
 
-      <h3>Create URL collection</h3>
-      <p class="dialog-subtitle">Fallback: provide direct public URLs to assets (read-only).</p>
+      <h3>{editMode ? 'Edit URL collection' : 'Create URL collection'}</h3>
 
       <div class="form-info">
         <ul class="feature-list">
@@ -322,21 +363,72 @@ function UrlCollectionForm({ onConnect, onBack }) {
         {status === 'connecting' ? (
           <>
             <FontAwesomeIcon icon={faSpinner} spin />
-            <span>Saving collection...</span>
+            <span>{editMode ? 'Saving changes...' : 'Saving collection...'}</span>
           </>
         ) : status === 'success' ? (
           <>
             <FontAwesomeIcon icon={faCheck} />
-            <span>Connected!</span>
+            <span>{editMode ? 'Updated!' : 'Connected!'}</span>
           </>
         ) : (
           <>
             <FontAwesomeIcon icon={faCheck} />
-            <span>Save URL collection</span>
+            <span>{editMode ? 'Save changes' : 'Save URL collection'}</span>
           </>
         )}
       </button>
     </div>
+  );
+}
+
+/**
+ * Expandable FAQ item
+ */
+function FaqItem({ question, children }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div class="faq-item">
+      <button 
+        class="faq-question" 
+        onClick={() => setExpanded(!expanded)}
+        type="button"
+      >
+        <FontAwesomeIcon icon={faQuestion} className="faq-icon" />
+        <span>{question}</span>
+        <FontAwesomeIcon icon={expanded ? faChevronDown : faChevronRight} className="faq-chevron" />
+      </button>
+      {expanded && (
+        <div class="faq-answer">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Existing collection list item
+ */
+function ExistingCollectionItem({ collection, onSelect, isLoading, selected }) {
+  return (
+    <button 
+      class={`existing-collection-item ${selected ? 'selected' : ''}`}
+      onClick={() => onSelect(collection)}
+      disabled={isLoading}
+    >
+      <div class="collection-info">
+        <FontAwesomeIcon icon={faFolderOpen} className="collection-icon" />
+        <div class="collection-details">
+          <span class="collection-name">{collection.name}</span>
+          <span class="collection-meta">
+            {collection.id} · {collection.assetCount} asset{collection.assetCount !== 1 ? 's' : ''}
+            {collection.hasManifest && <span class="manifest-badge">manifest</span>}
+          </span>
+        </div>
+      </div>
+      <FontAwesomeIcon icon={faChevronRight} className="collection-arrow" />
+    </button>
   );
 }
 
@@ -359,13 +451,17 @@ function SupabaseForm({ onConnect, onBack }) {
   const [anonKey, setAnonKey] = useState(initialSettings.anonKey);
   const [bucket, setBucket] = useState(initialSettings.bucket);
   const [collectionName, setCollectionName] = useState('');
-  const [collectionId, setCollectionId] = useState('default');
-  const [idTouched, setIdTouched] = useState(false);
-  const [showSupabaseConfig, setShowSupabaseConfig] = useState(!initialSettings.supabaseUrl || !initialSettings.anonKey || !initialSettings.bucket);
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState(null);
   const [hasManifest, setHasManifest] = useState(null);
   const [uploadExisting, setUploadExisting] = useState(hasQueueFiles);
+
+  // Existing collections browser
+  const [existingCollections, setExistingCollections] = useState([]);
+  const [loadingCollections, setLoadingCollections] = useState(false);
+  const [showExisting, setShowExisting] = useState(false);
+  const [showSupabaseConfig, setShowSupabaseConfig] = useState(false);
+  const [selectedExisting, setSelectedExisting] = useState(null);
 
   const supabaseConfigured = Boolean(supabaseUrl && anonKey && bucket);
 
@@ -377,36 +473,71 @@ function SupabaseForm({ onConnect, onBack }) {
     return slug || 'collection';
   }, []);
 
-  useEffect(() => {
-    if (!idTouched && collectionName.trim()) {
-      setCollectionId(slugify(collectionName.trim()));
-    }
-  }, [collectionName, idTouched, slugify]);
+  // Auto-load existing collections when config is saved
+  const loadExistingCollections = useCallback(async () => {
+    if (!supabaseConfigured) return;
+    
+    setLoadingCollections(true);
+    setError(null);
+    
+    const result = await listExistingCollections({
+      supabaseUrl: supabaseUrl.trim(),
+      anonKey: anonKey.trim(),
+      bucket: bucket.trim(),
+    });
 
-  const handleSaveSettings = useCallback(() => {
+    setLoadingCollections(false);
+
+    if (result.success) {
+      setExistingCollections(result.collections);
+    } else {
+      setError(result.error);
+    }
+  }, [supabaseConfigured, supabaseUrl, anonKey, bucket]);
+
+  const handleSaveSettings = useCallback(async () => {
     if (!supabaseUrl.trim() || !anonKey.trim() || !bucket.trim()) {
       setError('Fill Supabase URL, anon key, and bucket.');
       return;
     }
+
+    setStatus('testing');
+    setError(null);
+
+    const testResult = await testBucketConnection({
+      supabaseUrl: supabaseUrl.trim(),
+      anonKey: anonKey.trim(),
+      bucket: bucket.trim(),
+    });
+
+    if (!testResult.success) {
+      setError(`Connection failed: ${testResult.error}`);
+      setStatus('idle');
+      return;
+    }
+
     saveSupabaseSettings({
       supabaseUrl: supabaseUrl.trim(),
       anonKey: anonKey.trim(),
       bucket: bucket.trim(),
     });
-    setShowSupabaseConfig(false);
-    setError(null);
-  }, [supabaseUrl, anonKey, bucket]);
 
-  const handleConnect = useCallback(async () => {
-    if (!supabaseConfigured) {
-      setError('Configure Supabase first.');
-      setShowSupabaseConfig(true);
-      return;
-    }
-    if (!collectionId.trim()) {
-      setError('Collection ID is required');
-      return;
-    }
+    setStatus('idle');
+    setError(null);
+
+    // Load existing collections after successful config
+    await loadExistingCollections();
+  }, [supabaseUrl, anonKey, bucket, loadExistingCollections]);
+
+  const handleChooseExisting = useCallback((collection) => {
+    setSelectedExisting(collection);
+    setHasManifest(null);
+    setStatus('idle');
+    setError(null);
+  }, []);
+
+  const handleConnectSelected = useCallback(async () => {
+    if (!selectedExisting) return;
 
     setStatus('connecting');
     setError(null);
@@ -416,7 +547,45 @@ function SupabaseForm({ onConnect, onBack }) {
         supabaseUrl: supabaseUrl.trim(),
         anonKey: anonKey.trim(),
         bucket: bucket.trim(),
-        collectionId: slugify(collectionId.trim()),
+        collectionId: selectedExisting.id,
+        collectionName: selectedExisting.name,
+      });
+
+      const result = await source.connect({ refreshManifest: true });
+
+      if (result.success) {
+        setHasManifest(source.config.config.hasManifest);
+        registerSource(source);
+        await saveSource(source.toJSON());
+        setStatus('success');
+        setTimeout(() => onConnect(source), 500);
+      } else {
+        setError(result.error || 'Failed to connect');
+        setStatus('error');
+      }
+    } catch (err) {
+      setError(err.message);
+      setStatus('error');
+    }
+  }, [supabaseUrl, anonKey, bucket, onConnect, selectedExisting]);
+
+  const handleCreateNew = useCallback(async () => {
+    if (!supabaseConfigured) {
+      setError('Configure Supabase first.');
+      return;
+    }
+
+    const collectionId = slugify(collectionName.trim()) || `collection-${Date.now()}`;
+
+    setStatus('connecting');
+    setError(null);
+
+    try {
+      const source = createSupabaseStorageSource({
+        supabaseUrl: supabaseUrl.trim(),
+        anonKey: anonKey.trim(),
+        bucket: bucket.trim(),
+        collectionId,
         collectionName: collectionName.trim() || undefined,
       });
 
@@ -446,60 +615,108 @@ function SupabaseForm({ onConnect, onBack }) {
       setError(err.message);
       setStatus('error');
     }
-  }, [supabaseConfigured, supabaseUrl, anonKey, bucket, collectionId, collectionName, slugify, onConnect, uploadExisting, queueFiles]);
+  }, [supabaseConfigured, supabaseUrl, anonKey, bucket, collectionName, slugify, onConnect, uploadExisting, queueFiles]);
 
+  // Show config-only view if not configured
+  if (!supabaseConfigured) {
+    return (
+      <div class="storage-form">
+        <button class="back-button" onClick={onBack}>
+          {'Back'}
+        </button>
+
+        <h3>Connect to Supabase</h3>
+        <p class="dialog-subtitle">Enter your Supabase credentials to get started.</p>
+
+        <div class="config-grid" style={{ marginTop: '16px' }}>
+          <div class="form-field">
+            <label>Supabase project URL</label>
+            <input
+              type="url"
+              placeholder="https://abc.supabase.co"
+              value={supabaseUrl}
+              onInput={(e) => setSupabaseUrl(e.target.value)}
+            />
+          </div>
+
+          <div class="form-field">
+            <label>Anon/public key</label>
+            <input
+              type="text"
+              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              value={anonKey}
+              onInput={(e) => setAnonKey(e.target.value)}
+            />
+          </div>
+
+          <div class="form-field">
+            <label>Bucket name</label>
+            <input
+              type="text"
+              placeholder="splat-assets"
+              value={bucket}
+              onInput={(e) => setBucket(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {error && (
+          <div class="form-error">
+            <FontAwesomeIcon icon={faExclamationTriangle} />
+            {' '}{error}
+          </div>
+        )}
+
+        <button
+          class="primary-button"
+          onClick={handleSaveSettings}
+          disabled={status === 'testing'}
+          style={{ marginTop: '16px' }}
+        >
+          {status === 'testing' ? (
+            <>
+              <FontAwesomeIcon icon={faSpinner} spin />
+              {' '}Testing connection...
+            </>
+          ) : (
+            'Connect to Supabase'
+          )}
+        </button>
+
+        <div class="faq-section" style={{ marginTop: '24px' }}>
+          <FaqItem question="Where do I find these keys?">
+            <ol class="faq-steps">
+              <li>Go to your <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer noopener">Supabase Dashboard</a></li>
+              <li>Select your project (or create one)</li>
+              <li>Click <strong>Project Settings</strong> → <strong>API</strong></li>
+              <li>Copy the <strong>Project URL</strong> and <strong>anon/public</strong> key</li>
+              <li>Go to <strong>Storage</strong> to create a bucket if needed</li>
+            </ol>
+          </FaqItem>
+
+          <FaqItem question="How do I set up a free Supabase store?">
+            <ol class="faq-steps">
+              <li>Sign up at <a href="https://supabase.com" target="_blank" rel="noreferrer noopener">supabase.com</a> (free tier available)</li>
+              <li>Create a new project</li>
+              <li>Go to <strong>Storage</strong> in the sidebar</li>
+              <li>Click <strong>New Bucket</strong>, name it (e.g., "splat-assets")</li>
+              <li>Toggle <strong>Public bucket</strong> on for easy access</li>
+              <li>Copy credentials from <strong>Project Settings</strong> → <strong>API</strong></li>
+            </ol>
+          </FaqItem>
+        </div>
+      </div>
+    );
+  }
+
+  // Configured view - show existing collections + create new
   return (
     <div class="storage-form">
       <button class="back-button" onClick={onBack}>
         {'Back'}
       </button>
 
-      <h3>Create Supabase collection</h3>
-      <p class="dialog-subtitle">Collections live under collections/{'{'}id{'}'} with manifest-first loading.</p>
-
-      <div class="form-info">
-        <ul class="feature-list">
-          <li><FontAwesomeIcon icon={faCheck} /> Auto-creates folder and manifest if missing</li>
-          <li><FontAwesomeIcon icon={faCheck} /> Uses your bucket directly; no proxy</li>
-          <li><FontAwesomeIcon icon={faCheck} /> Rescan anytime to refresh manifest</li>
-        </ul>
-      </div>
-
-      <div class="form-field">
-        <label>Collection name</label>
-        <input
-          type="text"
-          placeholder="My splat gallery"
-          value={collectionName}
-          onInput={(e) => setCollectionName(e.target.value)}
-        />
-        <span class="field-hint">Shown in the app; optional.</span>
-      </div>
-
-      <div class="form-field">
-        <label>Collection ID</label>
-        <input
-          type="text"
-          placeholder="my-room-scan"
-          value={collectionId}
-          onInput={(e) => { setCollectionId(e.target.value); setIdTouched(true); }}
-        />
-        <span class="field-hint">Stored under collections/{'{'}collectionId{'}'} in your bucket.</span>
-      </div>
-
-      {hasQueueFiles && (
-        <div class="form-field">
-          <label class="checkbox-inline">
-            <input
-              type="checkbox"
-              checked={uploadExisting}
-              onChange={(e) => setUploadExisting(e.target.checked)}
-            />
-            Upload current images ({queueFiles.length})
-          </label>
-          <span class="field-hint">Uploads start right after the collection is created; unsupported files are skipped.</span>
-        </div>
-      )}
+      <h3>Supabase Collection</h3>
       <div class="form-section">
         <div class="form-row">
           <div>
@@ -535,7 +752,7 @@ function SupabaseForm({ onConnect, onBack }) {
                 value={anonKey}
                 onInput={(e) => setAnonKey(e.target.value)}
               />
-              <span class="field-hint">Use the anon/public key; the app is client-only.</span>
+              {/* <span class="field-hint">Use the anon/public key; the app is client-only.</span> */}
             </div>
 
             <div class="form-field">
@@ -555,6 +772,135 @@ function SupabaseForm({ onConnect, onBack }) {
         )}
       </div>
 
+      {/* Existing collections section */}
+      <div class="form-section" style={{ marginTop: '16px' }}>
+        <div class="form-row">
+          <div>
+            <strong>
+              <FontAwesomeIcon icon={faFolderOpen} style={{ marginRight: '8px' }} />
+              Add Existing Folder
+            </strong>
+          </div>
+          <button 
+            class="link-button" 
+            onClick={() => {
+              setShowExisting(!showExisting);
+              if (!showExisting && existingCollections.length === 0) {
+                loadExistingCollections();
+              }
+            }}
+          >
+            {showExisting ? 'Hide' : 'Browse'}
+          </button>
+        </div>
+
+        {showExisting && (
+          <div class="existing-collections-list">
+            {loadingCollections ? (
+              <div class="collections-loading">
+                <FontAwesomeIcon icon={faSpinner} spin />
+                {' '}Scanning bucket...
+              </div>
+            ) : existingCollections.length === 0 ? (
+              <div class="collections-empty">
+                No existing collections found in this bucket.
+              </div>
+            ) : (
+              existingCollections.map((col) => (
+                <ExistingCollectionItem
+                  key={col.id}
+                  collection={col}
+                  onSelect={handleChooseExisting}
+                  isLoading={status === 'connecting'}
+                  selected={selectedExisting?.id === col.id}
+                />
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      {selectedExisting && (
+        <div class="form-section existing-selection-review" style={{ position: 'relative' }}>
+          <button
+            class="modal-close selection-close"
+            title="Clear selected collection"
+            onClick={() => setSelectedExisting(null)}
+            disabled={status === 'connecting'}
+            style={{ position: 'absolute', top: '8px', right: '8px' }}
+          >
+            <FontAwesomeIcon icon={faTimes} />
+          </button>
+
+          <div class="form-row">
+            <div>
+              <strong>Selected collection</strong>
+              <div class="field-hint">
+                {selectedExisting.name} ({selectedExisting.id}) · {selectedExisting.assetCount} asset{selectedExisting.assetCount !== 1 ? 's' : ''}
+                {selectedExisting.hasManifest && ' · manifest detected'}
+              </div>
+            </div>
+          </div>
+
+          <div class="form-actions" style={{ marginTop: '16px', gap: '8px', display: 'flex' }}>
+            <button
+              class="secondary-button"
+              style={{marginTop: "0px"}}
+              onClick={() => setSelectedExisting(null)}
+              disabled={status === 'connecting'}
+            >
+              Switch to new collection
+            </button>
+            <button
+              class="primary-button"
+              onClick={handleConnectSelected}
+              disabled={status === 'connecting'}
+            >
+              {status === 'connecting' ? (
+                <>
+                  <FontAwesomeIcon icon={faSpinner} spin />
+                  {' '}Connecting...
+                </>
+              ) : (
+                'Done'
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div class="form-divider">
+        <span>or create new</span>
+      </div>
+
+      {/* Create new collection */}
+      <div class="form-field">
+        <label>Collection name</label>
+        <input
+          type="text"
+          placeholder="My splat gallery"
+          value={collectionName}
+          onInput={(e) => setCollectionName(e.target.value)}
+        />
+        <span class="field-hint">
+          Will be stored under collections/{slugify(collectionName) || 'collection-xxx'}/
+        </span>
+      </div>
+
+      {hasQueueFiles && (
+        <div class="form-field">
+          <label class="checkbox-inline">
+            <input
+              type="checkbox"
+              checked={uploadExisting}
+              onChange={(e) => setUploadExisting(e.target.checked)}
+            />
+            Upload current images ({queueFiles.length})
+          </label>
+          <span class="field-hint">Uploads start right after the collection is created.</span>
+        </div>
+      )}
+
       {error && (
         <div class="form-error">
           <FontAwesomeIcon icon={faExclamationTriangle} />
@@ -568,76 +914,63 @@ function SupabaseForm({ onConnect, onBack }) {
           {' '}
           {hasManifest
             ? 'Found manifest.json - loading is manifest-first'
-            : 'Manifest was created for you - you can rescan later'}
+            : 'Manifest was created for you'}
         </div>
       )}
 
       <button
         class="primary-button"
-        onClick={handleConnect}
-            disabled={status === 'connecting' || status === 'uploading' || !collectionId.trim()}
+        onClick={handleCreateNew}
+        disabled={status === 'connecting' || status === 'uploading'}
       >
         {status === 'connecting' ? (
           <>
             <FontAwesomeIcon icon={faSpinner} spin />
             {' '}Creating collection...
           </>
-            ) : status === 'uploading' ? (
-              <>
-                <FontAwesomeIcon icon={faSpinner} spin />
-                {' '}Uploading current images...
-              </>
+        ) : status === 'uploading' ? (
+          <>
+            <FontAwesomeIcon icon={faSpinner} spin />
+            {' '}Uploading...
+          </>
         ) : status === 'success' ? (
           <>
             <FontAwesomeIcon icon={faCheck} />
             {' '}Connected!
           </>
         ) : (
-          'Create collection'
+          'Create New Collection'
         )}
       </button>
 
-      <details class="form-details">
-        <summary>Bucket layout (auto-created)</summary>
-        <pre>{`${bucket || 'your-bucket'}/
-└── collections/${slugify(collectionId) || '{collectionId}'}/
-    ├── manifest.json
-    └── assets/
-        ├── scene1.ply
-        ├── scene1.preview.jpg
-        ├── scene1.meta.json
-        └── ...`}</pre>
-      </details>
-
-      <p class="form-note">
-        Helpful links:{' '}
-        <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer noopener">Supabase dashboard</a>
-        {' '}·{' '}
+      <p class="form-note" style={{ marginTop: '16px' }}>
+        <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer noopener">Dashboard</a>
+        {' · '}
         <a href="https://supabase.com/docs/guides/storage" target="_blank" rel="noreferrer noopener">Storage docs</a>
-        {' '}·{' '}
-        <a href="https://supabase.com/docs/guides/storage/public-buckets" target="_blank" rel="noreferrer noopener">Public bucket setup</a>
-      </p>
-
-      <p class="form-note">
-        Make sure your bucket is public or has an anon write policy so manifest.json can be created.
       </p>
     </div>
   );
 }
 
-function ConnectStorageDialog({ isOpen, onClose, onConnect }) {
-  const [selectedTier, setSelectedTier] = useState(null);
+function ConnectStorageDialog({ isOpen, onClose, onConnect, editSource, onEditComplete }) {
+  const [selectedTier, setSelectedTier] = useState(editSource?.type || null);
   const localSupported = isFileSystemAccessSupported();
+
+  useEffect(() => {
+    if (editSource) {
+      setSelectedTier(editSource.type);
+    }
+  }, [editSource]);
 
   const handleConnect = useCallback((source) => {
     onConnect?.(source);
     onClose();
-    setSelectedTier(null);
-  }, [onConnect, onClose]);
+    setSelectedTier(editSource?.type || null);
+  }, [onConnect, onClose, editSource?.type]);
 
   const handleBack = useCallback(() => {
-    setSelectedTier(null);
-  }, []);
+    setSelectedTier(editSource?.type || null);
+  }, [editSource?.type]);
 
   const handleClose = useCallback(() => {
     onClose();
@@ -646,6 +979,8 @@ function ConnectStorageDialog({ isOpen, onClose, onConnect }) {
 
   if (!isOpen) return null;
 
+  const isEditMode = Boolean(editSource && editSource.type === 'public-url');
+
   const content = (
     <div class="modal-overlay storage-dialog-overlay" onClick={handleClose}>
       <div class="modal-content storage-dialog" onClick={(e) => e.stopPropagation()}>
@@ -653,7 +988,7 @@ function ConnectStorageDialog({ isOpen, onClose, onConnect }) {
           <FontAwesomeIcon icon={faTimes} />
         </button>
 
-        {selectedTier === null ? (
+        {selectedTier === null && !isEditMode ? (
           <>
             <h2>Create a collection</h2>
             <p class="dialog-subtitle">
@@ -684,7 +1019,13 @@ function ConnectStorageDialog({ isOpen, onClose, onConnect }) {
         ) : selectedTier === 'supabase-storage' ? (
           <SupabaseForm onConnect={handleConnect} onBack={handleBack} />
         ) : selectedTier === 'public-url' ? (
-          <UrlCollectionForm onConnect={handleConnect} onBack={handleBack} />
+          <UrlCollectionForm 
+            onConnect={handleConnect} 
+            onBack={handleBack}
+            initialSource={isEditMode ? editSource : null}
+            editMode={isEditMode}
+            onSaveEdit={onEditComplete || onConnect}
+          />
         ) : null}
       </div>
     </div>

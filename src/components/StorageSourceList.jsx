@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'preact/hooks';
+import { createPortal } from 'preact/compat';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faFolder,
@@ -17,10 +18,12 @@ import {
   faExclamationTriangle,
   faSpinner,
   faChevronDown,
-  faChevronRight,
   faUnlock,
   faUpload,
   faLink,
+  faTimes,
+  faPen,
+  faEllipsisVertical,
 } from '@fortawesome/free-solid-svg-icons';
 import {
   getSourcesArray,
@@ -32,6 +35,7 @@ import {
 import { useStore } from '../store';
 import { getSupportedExtensions, getFormatAccept } from '../formats/index.js';
 import { testSharpCloud } from '../testSharpCloud';
+import ConnectStorageDialog from './ConnectStorageDialog';
 
 const TYPE_ICONS = {
   'local-folder': faFolder,
@@ -58,7 +62,7 @@ const formatEta = (seconds) => {
 /**
  * Individual source item with controls
  */
-function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isActive }) {
+function SourceItem({ source, onSelect, onRemove, onEditSource, expanded, onToggleExpand, isActive }) {
   const [status, setStatus] = useState('checking');
   const [assetCount, setAssetCount] = useState(source.getAssets().length);
   const [isLoading, setIsLoading] = useState(false);
@@ -79,9 +83,6 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
     return collectionId ? `collections/${collectionId}/assets` : 'collections/default/assets';
   }, [source?.config?.config?.collectionId]);
 
-  useEffect(() => {
-    console.log('upload flags changed', { isLoading, isUploading, uploadProgress, status });
-  }, [isLoading, isUploading, uploadProgress, status]);
 
   const refreshAssets = useCallback(async () => {
     setIsLoading(true);
@@ -497,6 +498,12 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
     }
   }, [isDefault, source?.id]);
 
+  const handleEditPublicUrl = useCallback((e) => {
+    e.stopPropagation();
+    if (source.type !== 'public-url') return;
+    onEditSource?.(source);
+  }, [onEditSource, source]);
+
   return (
     <>
       <input
@@ -510,53 +517,58 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
       <div 
         class={`source-item ${isConnected ? 'connected' : ''} ${status} ${isActive ? 'active' : ''}`}
         onClick={handleClick}
+        style={{ display: 'flex', flexDirection: 'column' }}
       >
-      <div class="expand-wrapper" style={{ position: 'relative', display: 'inline-block' }}>
-        <div
-          class="expand-hit-area"
-          style={{  width: "60px", position: 'absolute', top: '-8px', left: '-8px', right: '-8px', bottom: '-8px', background: 'transparent', zIndex: 1 }}
-          onClick={(e) => { e.stopPropagation(); onToggleExpand?.(); }}
-        />
-        <button 
-          class="source-expand"
-          onClick={(e) => { e.stopPropagation(); onToggleExpand?.(); }}
-          style={{ position: 'relative', zIndex: 2, marginLeft: '2px' }}
-        >
-          <FontAwesomeIcon icon={expanded ? faChevronDown : faChevronRight} />
-        </button>
-      </div>
+        <div style={{ display: 'flex', alignItems: 'center', width: '100%', minHeight: '32px' }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', minWidth: 0, paddingLeft: '4px', paddingRight: '0px' }}>
+            <div class="source-info" style={{ flex: 1 }}>
+              <div class="source-name">
+                <span class="source-name-text">{source.name}</span>
+              </div>
+              <div class="source-meta">
+                <FontAwesomeIcon icon={TYPE_ICONS[source.type] || faFolder} className="source-type-icon" />
+                <span class="source-type">{TYPE_LABELS[source.type]}</span>
+                {isConnected && assetCount > 0 && (
+                  <span class="source-count">{assetCount}</span>
+                )}
+              </div>
+            </div>
 
-      <div class="source-info">
-        <div class="source-name">
-          <span class="source-name-text">{source.name}</span>
-        </div>
-        <div class="source-meta">
-          <FontAwesomeIcon icon={TYPE_ICONS[source.type] || faFolder} className="source-type-icon" />
-          <span class="source-type">{TYPE_LABELS[source.type]}</span>
-          {isConnected && assetCount > 0 && (
-            <span class="source-count">{assetCount}</span>
-          )}
-        </div>
-      </div>
-
-      <div class="source-status">
-        {isLoading ? (
-          <div class="status-loading">
-            {showUploadProgress && (
-              <span class="upload-progress">
-                {uploadProgress?.completed}/{uploadProgress?.total}  {etaLabel}
-              </span>
-            )}
-            <FontAwesomeIcon icon={faSpinner} spin />
+            <div class="source-status">
+              {isLoading ? (
+                <div class="status-loading">
+                  {showUploadProgress && (
+                    <span class="upload-progress">
+                      {uploadProgress?.completed}/{uploadProgress?.total}  {etaLabel}
+                    </span>
+                  )}
+                  <FontAwesomeIcon icon={faSpinner} spin />
+                </div>
+              ) : isConnected ? (
+                <></>
+              ) : needsPermission ? (
+                <FontAwesomeIcon icon={faUnlock} className="status-warning" />
+              ) : (
+                <FontAwesomeIcon icon={faExclamationTriangle} className="status-error" />
+              )}
+            </div>
           </div>
-        ) : isConnected ? (
-          <></>
-        ) : needsPermission ? (
-          <FontAwesomeIcon icon={faUnlock} className="status-warning" />
-        ) : (
-          <FontAwesomeIcon icon={faExclamationTriangle} className="status-error" />
-        )}
-      </div>
+
+          <div class="expand-wrapper" style={{ position: 'relative', display: 'flex', alignItems: 'center', paddingLeft: '2px', flexShrink: 0 }}>
+            <div
+              class="expand-hit-area"
+              style={{ width: "40px", height: "40px", position: 'absolute', top: '50%', right: '-4px', transform: 'translateY(-50%)', background: 'transparent', zIndex: 1, cursor: 'pointer' }}
+              onClick={(e) => { e.stopPropagation(); onToggleExpand?.(); }}
+            />
+            <button 
+              class="source-expand"
+              onClick={(e) => { e.stopPropagation(); onToggleExpand?.(); }}
+              style={{ position: 'relative', zIndex: 2 }}
+            >
+              <FontAwesomeIcon icon={faEllipsisVertical} />
+            </button>
+          </div>
+        </div>
 
       {expanded && (
         <div class="source-actions" onClick={(e) => e.stopPropagation()}>
@@ -596,6 +608,16 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
             {isDefault && <FontAwesomeIcon icon={faCheck} />}
             <span>{isDefault ? 'Default' : 'Set Default'}</span>
           </button>
+          {source.type === 'public-url' && (
+            <button
+              class="source-action-btn"
+              onClick={handleEditPublicUrl}
+              title="Edit URLs"
+            >
+              <FontAwesomeIcon icon={faPen} />
+              <span>Edit</span>
+            </button>
+          )}
           {source.type === 'supabase-storage' && (
             <>
               <button
@@ -620,18 +642,34 @@ function SourceItem({ source, onSelect, onRemove, expanded, onToggleExpand, isAc
       )}
       </div>
 
-      {showConvertModal && (
-        <div class="modal-overlay">
-          <div class="modal-content">
-            <h3>Convert images?</h3>
-            <p>Convert and upload {pendingImageFiles.length} image{pendingImageFiles.length === 1 ? '' : 's'} to this Supabase collection?</p>
-            <p class="modal-subnote">Prefix: {collectionPrefix}</p>
-            <div class="modal-actions">
-              <button onClick={handleCancelConvert}>Cancel</button>
-              <button  onClick={handleConfirmConvert}>Convert & Upload</button>
+      {showConvertModal && createPortal(
+        <div class="modal-overlay storage-dialog-overlay">
+          <div class="modal-content storage-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <button class="modal-close" onClick={handleCancelConvert}>
+              <FontAwesomeIcon icon={faTimes} />
+            </button>
+
+            <h2>Convert images?</h2>
+            <p class="dialog-subtitle">
+              Convert and upload {pendingImageFiles.length} image{pendingImageFiles.length === 1 ? '' : 's'} to this Supabase collection?
+            </p>
+            
+            <div class="form-info">
+              <ul class="feature-list">
+                 <li><FontAwesomeIcon icon={faUpload} /> Files will be converted to splats in sog format via </li>
+                 <li><FontAwesomeIcon icon={faFolder} /><span>Saved to Supabase bucket at: <i>{collectionPrefix}</i></span> </li>
+              </ul>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '24px' }}>
+              <button class="secondary-button" onClick={handleCancelConvert} style={{ height: '36px', padding: '0 16px', minWidth: '80px', marginTop: '0' }}>Cancel</button>
+              <button class="primary-button" onClick={handleConfirmConvert} style={{ height: '36px', padding: '0 16px' }}>
+                <FontAwesomeIcon icon={faUpload} /> Upload
+              </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
@@ -644,6 +682,7 @@ function StorageSourceList({ onAddSource, onSelectSource }) {
   const [sources, setSources] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
   const [isListExpanded, setIsListExpanded] = useState(true);
+  const [editSource, setEditSource] = useState(null);
   const activeSourceId = useStore((state) => state.activeSourceId);
 
   // Load sources on mount and subscribe to changes
@@ -666,6 +705,14 @@ function StorageSourceList({ onAddSource, onSelectSource }) {
       setExpandedId(null);
     }
   }, [expandedId]);
+
+  const handleEditSource = useCallback((source) => {
+    setEditSource(source);
+  }, []);
+
+  const handleCloseEdit = useCallback(() => {
+    setEditSource(null);
+  }, []);
 
   return (
     <div class="settings-group">
@@ -706,12 +753,22 @@ function StorageSourceList({ onAddSource, onSelectSource }) {
                 expanded={expandedId === source.id}
                 onToggleExpand={() => handleToggleExpand(source.id)}
                 onSelect={onSelectSource}
+                onEditSource={handleEditSource}
                 onRemove={handleRemove}
               />
             ))}
           </div>
         )}
       </div>
+
+      {editSource && (
+        <ConnectStorageDialog
+          isOpen={!!editSource}
+          onClose={handleCloseEdit}
+          onConnect={handleCloseEdit}
+          editSource={editSource}
+        />
+      )}
     </div>
   );
 }

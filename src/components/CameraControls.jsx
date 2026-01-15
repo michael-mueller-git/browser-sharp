@@ -130,8 +130,6 @@ function CameraControls() {
   const currentAssetIndex = useStore((state) => state.currentAssetIndex);
   const hasCustomFocus = useStore((state) => state.hasCustomFocus);
   const setHasCustomFocus = useStore((state) => state.setHasCustomFocus);
-  const showFps = useStore((state) => state.showFps);
-  const setShowFps = useStore((state) => state.setShowFps);
   const stereoEnabled = useStore((state) => state.stereoEnabled);
   const setStereoEnabled = useStore((state) => state.setStereoEnabled);
   const vrSupported = useStore((state) => state.vrSupported);
@@ -508,14 +506,6 @@ function CameraControls() {
     }
   }, [setImmersiveSensitivity, cameraRange, setCameraRange]);
 
-  /** Toggle FPS overlay */
-  const handleFpsToggle = useCallback((e) => {
-    const enabled = Boolean(e.target.checked);
-    setShowFps(enabled);
-    const el = document.getElementById('fps-counter');
-    if (el) el.style.display = enabled ? 'block' : 'none';
-  }, [setShowFps]);
-
   /**
    * Resets view with immersive mode support.
    * Uses the shared function that pauses orientation input during animation.
@@ -629,18 +619,6 @@ function CameraControls() {
         )}
 
         {/* Orbit range control */}
-        <div class="control-row">
-          <span class="control-label">Show FPS</span>
-          <label class="switch">
-            <input
-              type="checkbox"
-              checked={showFps}
-              onChange={handleFpsToggle}
-            />
-            <span class="switch-track" aria-hidden="true" />
-          </label>
-        </div>
-
         <div class="control-row">
           <span class="control-label">Side-by-side stereo</span>
           <label class="switch">

@@ -135,7 +135,7 @@ export const SOURCE_TIERS = {
   'public-url': {
     tier: 3,
     label: 'URL list',
-    description: 'Fallback list of public asset URLs (read-only)',
+    description: 'List of public asset URLs (read-only)',
     benefits: ['No setup', 'Works with any public file URL'],
     requirements: ['Direct HTTP/HTTPS links to .sog/.ply assets'],
     icon: 'link',

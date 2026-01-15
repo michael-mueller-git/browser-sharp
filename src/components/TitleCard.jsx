@@ -100,13 +100,13 @@ function TitleCard({
               <FontAwesomeIcon icon={faCloud} />
               <span>Connect Storage</span>
             </button>
-            <button class="action-btn cloud-test" onClick={handleTestCloudUpload}>
+            {/* <button class="action-btn cloud-test" onClick={handleTestCloudUpload}>
               <FontAwesomeIcon icon={faUpload} />
               <span>Test Cloud Upload</span>
-            </button>
+            </button> */}
             <button class="action-btn demo" onClick={onLoadDemo}>
               <FontAwesomeIcon icon={faRocket} />
-              <span>Load Demo Collection</span>
+              <span>Load Demo Data</span>
             </button>
           </div>
         </div>

@@ -8,6 +8,7 @@ import { useState, useCallback } from 'preact/hooks';
 import { useStore } from '../store';
 import CameraControls from './CameraControls';
 import AnimationSettings from './AnimationSettings';
+import DebugSettings from './DebugSettings';
 import StorageSourceList from './StorageSourceList';
 import ConnectStorageDialog from './ConnectStorageDialog';
 import { loadFromStorageSource } from '../fileLoader';
@@ -85,6 +86,7 @@ function SidePanel() {
         {/* Settings panels */}
         <CameraControls />
         <AnimationSettings />
+        <DebugSettings />
         {/* Storage sources */}
         <StorageSourceList 
           onAddSource={handleOpenStorageDialog}

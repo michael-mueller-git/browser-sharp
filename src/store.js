@@ -15,6 +15,25 @@
 
 import { create } from 'zustand';
 
+/** Safely load a persisted boolean flag from localStorage */
+const getPersistedBoolean = (key, fallback = false) => {
+  if (typeof window === 'undefined' || !window.localStorage) return fallback;
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (stored === null) return fallback;
+    return stored === 'true';
+  } catch (err) {
+    console.warn(`[Store] Failed to read ${key} from localStorage`, err);
+    return fallback;
+  }
+};
+
+/** Default state for mobile devtools (on for mobile, persisted if set) */
+const defaultDevtoolsEnabled = (() => {
+  const isProbablyMobile = typeof navigator !== 'undefined' && /Mobi|Android|iP(ad|hone|od)/i.test(navigator.userAgent);
+  return getPersistedBoolean('mobileDevtoolsEnabled', isProbablyMobile);
+})();
+
 /** Maximum number of log entries to keep */
 const MAX_LOG_ENTRIES = 14;
 
@@ -90,9 +109,11 @@ export const useStore = create((set, get) => ({
   isPortrait: false,
   immersiveMode: false,
   immersiveSensitivity: 1.0,
+  mobileDevtoolsEnabled: defaultDevtoolsEnabled,
   
   // Debug
   debugLoadingMode: false,
+  debugSettingsExpanded: false,
 
   // ============ Actions ============
   
@@ -233,9 +254,26 @@ export const useStore = create((set, get) => ({
 
   /** Sets visibility of FPS counter overlay */
   setShowFps: (show) => set({ showFps: show }),
+
+  /** Enables/disables mobile devtools (Eruda) and persists preference */
+  setMobileDevtoolsEnabled: (enabled) => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem('mobileDevtoolsEnabled', String(enabled));
+      } catch (err) {
+        console.warn('[Store] Failed to persist mobileDevtoolsEnabled', err);
+      }
+    }
+    set({ mobileDevtoolsEnabled: enabled });
+  },
   
   /** Toggles debug loading mode */
   toggleDebugLoadingMode: () => set((state) => ({ 
     debugLoadingMode: !state.debugLoadingMode 
+  })),
+
+  /** Toggles debug settings accordion */
+  toggleDebugSettingsExpanded: () => set((state) => ({ 
+    debugSettingsExpanded: !state.debugSettingsExpanded 
   })),
 }));

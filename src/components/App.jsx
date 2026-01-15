@@ -190,7 +190,6 @@ function App() {
    */
   const handleOpenStorage = useCallback(() => {
     (async () => {
-      setLandingVisible(false);
       await new Promise((r) => setTimeout(r, PANEL_TRANSITION_MS));
       setStorageDialogOpen(true);
     })();
