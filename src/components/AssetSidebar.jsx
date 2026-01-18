@@ -200,7 +200,7 @@ function AssetSidebar() {
    * Handle successful image load
    */
   const handleImageLoad = useCallback((index, asset) => {
-    console.log(`[AssetSidebar] Image loaded OK for index ${index}: "${asset.name}"`);
+    // console.log(`[AssetSidebar] Image loaded OK for index ${index}: "${asset.name}"`);
     setBrokenPreviews(prev => {
       if (prev.has(index)) {
         const next = new Set(prev);

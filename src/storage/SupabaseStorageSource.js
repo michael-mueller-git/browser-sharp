@@ -16,6 +16,7 @@ import { AssetSource } from './AssetSource.js';
 import { createSourceId, MANIFEST_VERSION, SUPPORTED_MANIFEST_VERSIONS } from './types.js';
 import { saveSource } from './sourceManager.js';
 import { getSupportedExtensions } from '../formats/index.js';
+import { loadSupabaseManifestCache, saveSupabaseManifestCache } from './supabaseSettings.js';
 
 const PREVIEW_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 const METADATA_SUFFIXES = ['.meta.json', '.metadata.json'];
@@ -142,8 +143,27 @@ export class SupabaseStorageSource extends AssetSource {
     }
   }
 
-  async _loadManifest() {
+  async _loadManifest({ bypassCache = false } = {}) {
     try {
+      const cacheKey = {
+        supabaseUrl: this.config.config.supabaseUrl,
+        bucket: this.config.config.bucket,
+        collectionId: this.config.config.collectionId,
+      };
+
+      if (!bypassCache) {
+        const cachedManifest = loadSupabaseManifestCache(cacheKey);
+        if (cachedManifest) {
+          this._manifest = cachedManifest;
+          this.config.config.hasManifest = true;
+          if (cachedManifest.name) {
+            this.name = cachedManifest.name;
+            this.config.name = cachedManifest.name;
+          }
+          return cachedManifest;
+        }
+      }
+
       const manifestPath = this._toStoragePath('manifest.json');
       const { data, error } = await this._storage().download(manifestPath);
       if (error) {
@@ -161,6 +181,7 @@ export class SupabaseStorageSource extends AssetSource {
 
       this._manifest = manifest;
       this.config.config.hasManifest = true;
+      saveSupabaseManifestCache(cacheKey, manifest);
 
       if (manifest.name) {
         this.name = manifest.name;
@@ -185,6 +206,11 @@ export class SupabaseStorageSource extends AssetSource {
     }
     this._manifest = manifest;
     this.config.config.hasManifest = true;
+    saveSupabaseManifestCache({
+      supabaseUrl: this.config.config.supabaseUrl,
+      bucket: this.config.config.bucket,
+      collectionId: this.config.config.collectionId,
+    }, manifest);
     await saveSource(this.toJSON());
   }
 

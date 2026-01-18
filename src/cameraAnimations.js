@@ -1,11 +1,14 @@
 import { camera, controls, requestRender, THREE, bgImageContainer } from "./viewer.js";
 import { cancelLoadZoomAnimation } from "./customAnimations.js";
+import { useStore } from "./store.js";
+import gsap from "gsap";
 
 let animationState = null;
 let resetAnimationState = null;
 let anchorAnimationState = null;
+let currentGsapTween = null; // Track active GSAP tween for cancellation
 
-// Easing functions
+// Easing functions (kept for non-slideshow animations)
 const easingFunctions = {
   'linear': (t) => t,
   'ease-in': (t) => t * t * t,
@@ -13,7 +16,56 @@ const easingFunctions = {
   'ease-in-out': (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
 };
 
-// NOTE: Load/zoom animation helpers have been moved to customAnimations.js
+// ============================================================================
+// SLIDESHOW TIMING CONFIGURATION (GSAP)
+// ============================================================================
+// These values control the "feel" of slideshow transitions.
+// Adjust durations and easing to taste. GSAP supports:
+//   - Standard eases: "power1", "power2", "power3", "power4" with .in, .out, .inOut
+//   - Custom bezier: "cubic-bezier(0.17, 0.67, 0.83, 0.67)" via CustomEase plugin
+//   - See: https://gsap.com/docs/v3/Eases/
+//
+// Current setup creates continuous motion feel:
+//   - Slide-in: rushes in fast, decelerates to slow drift at end
+//   - Slide-out: starts with slow drift, accelerates out fast
+//   - Handoff between animations feels like one continuous motion
+// ============================================================================
+
+export const SLIDESHOW_CONFIG = {
+  slideIn: {
+    totalDuration: 5,
+    speedMultiplier: 1.0,   // NEW: >1 = faster (shorter), <1 = slower (longer)
+    decelTimeRatio: 0.45,
+    fastSpeed: 1.0,
+    slowSpeed: 0.25,
+    decelEase: "power3.out",
+    slowEase: "none",
+  },
+  slideOut: {
+    totalDuration: 3,
+    speedMultiplier: 1.0,   // NEW: >1 = faster (shorter), <1 = slower (longer)
+    slowTimeRatio: 0.55,
+    fastSpeed: 1.0,
+    slowSpeed: 0.25,
+    accelEase: "power3.in",
+    fadeDelay: 0.7,
+  },
+};
+
+// Non-slideshow defaults (original behavior)
+const DEFAULT_CONFIG = {
+  slideIn: {
+    duration: 1.2,
+    ease: "power2.out",
+  },
+  slideOut: {
+    duration: 1.2,
+    ease: "power2.in",
+    fadeDelay: 0.7,
+  },
+};
+
+const getStoreState = () => useStore.getState();
 
 // Smooth reset animation
 const easeInOutCubic = easingFunctions['ease-in-out'];
@@ -45,23 +97,16 @@ export const startSmoothResetAnimation = (targetState, { duration = 800, onCompl
     const t = Math.min(elapsed / duration, 1);
     const eased = easeInOutCubic(t);
 
-    // Lerp position
     camera.position.lerpVectors(startState.position, targetState.position, eased);
-
-    // Slerp quaternion for smooth rotation
     camera.quaternion.slerpQuaternions(startState.quaternion, targetState.quaternion, eased);
-
-    // Lerp FOV, near, far, zoom
     camera.fov = THREE.MathUtils.lerp(startState.fov, targetState.fov, eased);
     camera.near = THREE.MathUtils.lerp(startState.near, targetState.near, eased);
     camera.far = THREE.MathUtils.lerp(startState.far, targetState.far, eased);
     camera.zoom = THREE.MathUtils.lerp(startState.zoom, targetState.zoom, eased);
     camera.updateProjectionMatrix();
 
-    // Lerp controls target
     controls.target.lerpVectors(startState.target, targetState.target, eased);
     controls.update();
-
     requestRender();
 
     if (t < 1) {
@@ -103,7 +148,11 @@ export const startAnchorTransition = (nextTarget, { duration = 650, onComplete }
     const t = Math.min(elapsed / anchorAnimationState.duration, 1);
     const eased = easeInOutCubic(t);
 
-    const currentAnchor = new THREE.Vector3().lerpVectors(anchorAnimationState.startTarget, anchorAnimationState.endTarget, eased);
+    const currentAnchor = new THREE.Vector3().lerpVectors(
+      anchorAnimationState.startTarget, 
+      anchorAnimationState.endTarget, 
+      eased
+    );
 
     controls.target.copy(currentAnchor);
     controls.update();
@@ -137,6 +186,13 @@ export const cancelAnchorTransition = () => {
 let slideAnimationState = null;
 
 export const cancelSlideAnimation = () => {
+  // Kill GSAP tween if active
+  if (currentGsapTween) {
+    currentGsapTween.kill();
+    currentGsapTween = null;
+  }
+  
+  // Legacy cleanup for non-GSAP state
   if (slideAnimationState?.frameId) {
     cancelAnimationFrame(slideAnimationState.frameId);
   }
@@ -145,12 +201,10 @@ export const cancelSlideAnimation = () => {
   }
   slideAnimationState = null;
   
-  // Clean up CSS transition classes to ensure clean state
   const viewerEl = document.getElementById('viewer');
   if (viewerEl) {
     viewerEl.classList.remove('slide-out', 'slide-in');
   }
-
 };
 
 export const cancelResetAnimation = () => {
@@ -161,149 +215,195 @@ export const cancelResetAnimation = () => {
 };
 
 /**
- * Performs a slide-out animation (pan camera in direction of navigation).
+ * Calculate slide geometry based on mode and direction.
+ * Returns start/end positions for camera and target, plus orbit params.
+ * This is separated from timing so GSAP can handle the "when" while this handles the "where".
+ */
+const calculateSlideGeometry = (mode, direction, amount, isSlideOut) => {
+  const currentPosition = camera.position.clone();
+  const currentTarget = controls.target.clone();
+  const distance = currentPosition.distanceTo(currentTarget);
+
+  const forward = new THREE.Vector3().subVectors(currentTarget, currentPosition).normalize();
+  const up = camera.up.clone().normalize();
+  const right = new THREE.Vector3().crossVectors(forward, up).normalize();
+
+  let offsetPosition, offsetTarget, orbitAxis, orbitAngle;
+
+  switch (mode) {
+    case 'zoom':
+      // Zoom: move along forward axis
+      const zoomAmount = distance * (isSlideOut ? 0.3 : 0.25);
+      const zoomDir = isSlideOut ? 1 : -1;
+      const zoomOffset = forward.clone().multiplyScalar(zoomAmount * zoomDir);
+      offsetPosition = currentPosition.clone().add(zoomOffset);
+      offsetTarget = currentTarget.clone();
+      orbitAxis = up;
+      orbitAngle = 0;
+      break;
+
+    case 'fade':
+      // Fade: no camera movement
+      offsetPosition = currentPosition.clone();
+      offsetTarget = currentTarget.clone();
+      orbitAxis = up;
+      orbitAngle = 0;
+      break;
+
+    case 'vertical':
+      // Vertical: pan up/down
+      const vPanSign = isSlideOut 
+        ? (direction === 'next' ? -1 : 1)
+        : (direction === 'next' ? 1 : -1);
+      const vPanAmount = distance * amount * vPanSign;
+      const vPanOffset = up.clone().multiplyScalar(vPanAmount);
+      offsetPosition = currentPosition.clone().add(vPanOffset);
+      offsetTarget = currentTarget.clone().add(vPanOffset);
+      orbitAxis = right;
+      orbitAngle = (Math.PI / 180) * 8 * (direction === 'next' ? (isSlideOut ? 1 : -1) : (isSlideOut ? -1 : 1));
+      break;
+
+    default: // horizontal
+      const hPanSign = isSlideOut
+        ? (direction === 'next' ? 1 : -1)
+        : (direction === 'next' ? -1 : 1);
+      const hPanAmount = distance * amount * hPanSign;
+      const hPanOffset = right.clone().multiplyScalar(hPanAmount);
+      offsetPosition = currentPosition.clone().add(hPanOffset);
+      offsetTarget = currentTarget.clone().add(hPanOffset);
+      orbitAxis = up;
+      orbitAngle = (Math.PI / 180) * 8 * (direction === 'next' ? (isSlideOut ? 1 : -1) : (isSlideOut ? -1 : 1));
+      break;
+  }
+
+  if (isSlideOut) {
+    return {
+      startPosition: currentPosition,
+      endPosition: offsetPosition,
+      startTarget: currentTarget,
+      endTarget: offsetTarget,
+      orbitAxis,
+      orbitAngle,
+    };
+  } else {
+    return {
+      startPosition: offsetPosition,
+      endPosition: currentPosition,
+      startTarget: offsetTarget,
+      endTarget: currentTarget,
+      orbitAxis,
+      startOrbitAngle: orbitAngle,
+    };
+  }
+};
+
+/**
+ * Performs a slide-out animation using GSAP.
  * @param {'next'|'prev'} direction - Navigation direction
  * @param {Object} options - Animation options
- * @param {string} options.mode - Slide mode: 'horizontal', 'vertical', 'zoom', or 'fade'
  * @returns {Promise} Resolves when animation completes
  */
 export const slideOutAnimation = (direction, { duration = 1200, amount = 0.45, fadeDelay = 0.7, mode = 'horizontal' } = {}) => {
   return new Promise((resolve) => {
-    
+    const { slideshowMode, slideshowUseCustom } = getStoreState();
+    const useCustom = slideshowMode && slideshowUseCustom;
+    const config = useCustom ? SLIDESHOW_CONFIG.slideOut : DEFAULT_CONFIG.slideOut;
+
+    const baseDuration = useCustom ? config.totalDuration : duration / 1000;
+    const speedMultiplier = useCustom ? (config.speedMultiplier || 1) : 1;
+    const durationSec = baseDuration / speedMultiplier;
+    const actualFadeDelay = useCustom ? config.fadeDelay : fadeDelay;
+
+    cancelSlideAnimation();
+
+    const viewerEl = document.getElementById('viewer');
+    if (viewerEl) {
+      viewerEl.classList.remove('slide-in');
+    }
+
     if (!camera || !controls) {
       resolve();
       return;
     }
 
-    cancelSlideAnimation();
-    
-    const viewerEl = document.getElementById('viewer');
-    if (viewerEl) {
-      viewerEl.classList.remove('slide-in');
-    }
- 
-    
-    // Schedule canvas blur for later in the animation (last 0.45s)
+    console.log(`[SlideOut] START - duration: ${durationSec}s, mode: ${mode}`);
+
+    const geometry = calculateSlideGeometry(mode, direction, amount, true);
+    const { startPosition, endPosition, startTarget, endTarget, orbitAxis, orbitAngle } = geometry;
+
+    const proxy = { t: 0 };
+    let progress = 0;
+    let lastTime = 0;
+
+    const speedAt = useCustom
+      ? createSlideOutSpeedProfile(config, durationSec)
+      : null;
+
+    const speedScale = useCustom
+      ? computeSpeedScale(speedAt, durationSec)
+      : 1;
+
     const fadeTimeoutId = setTimeout(() => {
-      if (viewerEl) {
-        viewerEl.classList.add('slide-out');
-      }
-      // Fade background out in sync with canvas blur instead of immediately
-      if (bgImageContainer) {
-        bgImageContainer.classList.remove('active');
-      }
-    }, duration * fadeDelay);
+      if (viewerEl) viewerEl.classList.add('slide-out');
+      if (bgImageContainer) bgImageContainer.classList.remove('active');
+    }, durationSec * actualFadeDelay * 1000);
 
-    const startPosition = camera.position.clone();
-    const startTarget = controls.target.clone();
-    const distance = startPosition.distanceTo(startTarget);
+    slideAnimationState = { fadeTimeoutId };
 
-    // Calculate direction vectors
-    const forward = new THREE.Vector3().subVectors(startTarget, startPosition).normalize();
-    const up = camera.up.clone().normalize();
-    const right = new THREE.Vector3().crossVectors(forward, up).normalize();
+    currentGsapTween = gsap.to(proxy, {
+      t: durationSec,
+      duration: durationSec,
+      ease: "none",
+      onUpdate: () => {
+        let t = proxy.t;
 
-    let endPosition, endTarget, orbitAxis, orbitAngle;
-    
-    if (mode === 'zoom') {
-      // Zoom: move closer to target without orbit
-      const zoomAmount = distance * 0.3; // Zoom in by 30% of distance
-      const zoomOffset = forward.clone().multiplyScalar(zoomAmount);
-      endPosition = startPosition.clone().add(zoomOffset);
-      endTarget = startTarget.clone(); // Target stays the same
-      orbitAxis = up;
-      orbitAngle = 0; // No orbit rotation for zoom
-    } else if (mode === 'fade') {
-      // Fade: keep camera static (no pan/zoom)
-      endPosition = startPosition.clone();
-      endTarget = startTarget.clone();
-      orbitAxis = up;
-      orbitAngle = 0;
-    } else if (mode === 'vertical') {
-      // Vertical mode: pan up/down
-      const panSign = direction === 'next' ? -1 : 1; // next = pan down, prev = pan up
-      const panAmount = distance * amount * panSign;
-      const panOffset = up.clone().multiplyScalar(panAmount);
-      endPosition = startPosition.clone().add(panOffset);
-      endTarget = startTarget.clone().add(panOffset);
-      // Orbit around right axis for vertical movement
-      orbitAxis = right;
-      orbitAngle = (Math.PI / 180) * 8 * (direction === 'next' ? 1 : -1);
-    } else {
-      // Horizontal mode (default): pan left/right
-      const panSign = direction === 'next' ? 1 : -1;
-      const panAmount = distance * amount * panSign;
-      const panOffset = right.clone().multiplyScalar(panAmount);
-      endPosition = startPosition.clone().add(panOffset);
-      endTarget = startTarget.clone().add(panOffset);
-      orbitAxis = up;
-      orbitAngle = (Math.PI / 180) * 8 * (direction === 'next' ? 1 : -1);
-    }
+        if (useCustom) {
+          const dt = t - lastTime;
+          lastTime = t;
+          progress += speedAt(t) * speedScale * dt;
+          progress = clamp01(progress);
+        } else {
+          // legacy non-slideshow behavior
+          progress = clamp01(t / durationSec);
+          progress = gsap.parseEase(config.ease || "power2.in")(progress);
+        }
 
-    const animate = (timestamp) => {
-      if (!slideAnimationState) {
-        resolve();
-        return;
-      }
+        camera.position.lerpVectors(startPosition, endPosition, progress);
+        controls.target.lerpVectors(startTarget, endTarget, progress);
 
-      if (slideAnimationState.startTime == null) {
-        slideAnimationState.startTime = timestamp;
-      }
+        if (orbitAngle !== 0) {
+          const currentOrbitAngle = orbitAngle * progress;
+          const orbitOffset = new THREE.Vector3().subVectors(camera.position, controls.target);
+          orbitOffset.applyAxisAngle(orbitAxis, currentOrbitAngle);
+          camera.position.copy(controls.target).add(orbitOffset);
+        }
 
-      const elapsed = timestamp - slideAnimationState.startTime;
-      const t = Math.min(elapsed / duration, 1);
-      const eased = easingFunctions['ease-in'](t);
-
-      // Interpolate position and target
-      camera.position.lerpVectors(startPosition, endPosition, eased);
-      controls.target.lerpVectors(startTarget, endTarget, eased);
-
-      // Add orbit rotation (skip for zoom mode)
-      if (orbitAngle !== 0) {
-        const currentOrbitAngle = orbitAngle * eased;
-        const orbitOffset = new THREE.Vector3().subVectors(camera.position, controls.target);
-        orbitOffset.applyAxisAngle(orbitAxis, currentOrbitAngle);
-        camera.position.copy(controls.target).add(orbitOffset);
-      }
-
-      controls.update();
-      requestRender();
-
-      if (t < 1) {
-        slideAnimationState.frameId = requestAnimationFrame(animate);
-      } else {
+        controls.update();
+        requestRender();
+      },
+      onComplete: () => {
+        console.log(`[SlideOut] END`);
+        currentGsapTween = null;
         slideAnimationState = null;
         resolve();
-      }
-    };
-
-    slideAnimationState = {
-      frameId: requestAnimationFrame(animate),
-      startTime: null,
-      fadeTimeoutId,
-    };
+      },
+    });
   });
 };
 
-/**
- * Performs a slide-in animation (camera starts offset, slides to center).
- * Call this AFTER setting up the new camera position.
- * @param {'next'|'prev'} direction - Navigation direction (determines start offset)
- * @param {Object} options - Animation options
- * @param {string} options.mode - Slide mode: 'horizontal', 'vertical', 'zoom', or 'fade'
- * @returns {Promise} Resolves when animation completes
- */
-export const slideInAnimation = (direction, { duration = 7000, amount = 0.45, mode = 'horizontal' } = {}) => {
+export const slideInAnimation = (direction, { duration = 1200, amount = 0.45, mode = 'horizontal' } = {}) => {
   return new Promise((resolve) => {
-    cancelSlideAnimation();
-    
-    const viewerEl = document.getElementById('viewer');
-    const canvas = viewerEl?.querySelector('canvas');
-    
- 
+    const { slideshowMode, slideshowUseCustom } = getStoreState();
+    const useCustom = slideshowMode && slideshowUseCustom;
+    const config = useCustom ? SLIDESHOW_CONFIG.slideIn : DEFAULT_CONFIG.slideIn;
 
-    
-    // For non-fade modes, remove slide-out synchronously before setting up camera
+    const baseDuration = useCustom ? config.totalDuration : duration / 1000;
+    const speedMultiplier = useCustom ? (config.speedMultiplier || 1) : 1;
+    const durationSec = baseDuration / speedMultiplier;
+
+    cancelSlideAnimation();
+
+    const viewerEl = document.getElementById('viewer');
     if (viewerEl) {
       viewerEl.classList.remove('slide-out');
       void viewerEl.offsetHeight;
@@ -315,104 +415,123 @@ export const slideInAnimation = (direction, { duration = 7000, amount = 0.45, mo
       return;
     }
 
-    // End position is current (target) position
-    const endPosition = camera.position.clone();
-    const endTarget = controls.target.clone();
-    const distance = endPosition.distanceTo(endTarget);
+    console.log(`[SlideIn] START - duration: ${durationSec}s, mode: ${mode}`);
 
-    // Calculate direction vectors
-    const forward = new THREE.Vector3().subVectors(endTarget, endPosition).normalize();
-    const up = camera.up.clone().normalize();
-    const right = new THREE.Vector3().crossVectors(forward, up).normalize();
+    const geometry = calculateSlideGeometry(mode, direction, amount, false);
+    const { startPosition, endPosition, startTarget, endTarget, orbitAxis, startOrbitAngle } = geometry;
 
-    let startPosition, startTarget, orbitAxis, startOrbitAngle;
-    if (mode === 'zoom') {
-      // Zoom start: begin further out, then ease in
-      const zoomAmount = distance * 0.25; // Start 25% further out
-      const zoomOffset = forward.clone().multiplyScalar(-zoomAmount);
-      startPosition = endPosition.clone().add(zoomOffset);
-      startTarget = endTarget.clone(); // Target stays the same
-      orbitAxis = up;
-      startOrbitAngle = 0; // No orbit rotation for zoom
-    } else if (mode === 'fade') {
-      // Fade: keep camera static (no offset)
-      startPosition = endPosition.clone();
-      startTarget = endTarget.clone();
-      orbitAxis = up;
-      startOrbitAngle = 0;
-    } else if (mode === 'vertical') {
-      // Vertical mode: start offset vertically
-      const panSign = direction === 'next' ? 1 : -1; // Opposite of slide-out
-      const panAmount = distance * amount * panSign;
-      const panOffset = up.clone().multiplyScalar(panAmount);
-      startPosition = endPosition.clone().add(panOffset);
-      startTarget = endTarget.clone().add(panOffset);
-      // Orbit around right axis for vertical movement
-      orbitAxis = right;
-      startOrbitAngle = (Math.PI / 180) * 8 * (direction === 'next' ? -1 : 1);
-    } else {
-      // Horizontal mode (default): start offset horizontally
-      const panSign = direction === 'next' ? -1 : 1;
-      const panAmount = distance * amount * panSign;
-      const panOffset = right.clone().multiplyScalar(panAmount);
-      startPosition = endPosition.clone().add(panOffset);
-      startTarget = endTarget.clone().add(panOffset);
-      orbitAxis = up;
-      startOrbitAngle = (Math.PI / 180) * 8 * (direction === 'next' ? -1 : 1);
-    }
-
-    // Set camera to start position
     camera.position.copy(startPosition);
     controls.target.copy(startTarget);
     controls.update();
     requestRender();
 
-    const animate = (timestamp) => {
-      if (!slideAnimationState) {
-        resolve();
-        return;
-      }
+    const proxy = { t: 0 };
+    let progress = 0;
+    let lastTime = 0;
 
-      if (slideAnimationState.startTime == null) {
-        slideAnimationState.startTime = timestamp;
-      }
+    const speedAt = useCustom
+      ? createSlideInSpeedProfile(config, durationSec)
+      : null;
 
-      const elapsed = timestamp - slideAnimationState.startTime;
-      const t = Math.min(elapsed / duration, 1);
-      const eased = easingFunctions['ease-out'](t);
+    const speedScale = useCustom
+      ? computeSpeedScale(speedAt, durationSec)
+      : 1;
 
-      // Interpolate position and target
-      camera.position.lerpVectors(startPosition, endPosition, eased);
-      controls.target.lerpVectors(startTarget, endTarget, eased);
+    currentGsapTween = gsap.to(proxy, {
+      t: durationSec,
+      duration: durationSec,
+      ease: "none",
+      onUpdate: () => {
+        let t = proxy.t;
 
-      // Add orbit rotation (skip for zoom mode)
-      if (startOrbitAngle !== 0) {
-        const currentOrbitAngle = startOrbitAngle * (1 - eased);
-        const orbitOffset = new THREE.Vector3().subVectors(camera.position, controls.target);
-        orbitOffset.applyAxisAngle(orbitAxis, currentOrbitAngle);
-        camera.position.copy(controls.target).add(orbitOffset);
-      }
+        if (useCustom) {
+          const dt = t - lastTime;
+          lastTime = t;
+          progress += speedAt(t) * speedScale * dt;
+          progress = clamp01(progress);
+        } else {
+          progress = clamp01(t / durationSec);
+          progress = gsap.parseEase(config.ease || "power2.out")(progress);
+        }
 
-      controls.update();
-      requestRender();
+        camera.position.lerpVectors(startPosition, endPosition, progress);
+        controls.target.lerpVectors(startTarget, endTarget, progress);
 
-      if (t < 1) {
-        slideAnimationState.frameId = requestAnimationFrame(animate);
-      } else {
+        if (startOrbitAngle !== 0) {
+          const currentOrbitAngle = startOrbitAngle * (1 - progress);
+          const orbitOffset = new THREE.Vector3().subVectors(camera.position, controls.target);
+          orbitOffset.applyAxisAngle(orbitAxis, currentOrbitAngle);
+          camera.position.copy(controls.target).add(orbitOffset);
+        }
+
+        controls.update();
+        requestRender();
+      },
+      onComplete: () => {
+        console.log(`[SlideIn] END`);
+        currentGsapTween = null;
         slideAnimationState = null;
-        // Clean up blur classes after slide-in completes
-        const viewerEl = document.getElementById('viewer');
+
         if (viewerEl) {
           viewerEl.classList.remove('slide-out', 'slide-in');
         }
-     
         resolve();
-      }
-    };
-
-    slideAnimationState = {
-      frameId: requestAnimationFrame(animate),
-      startTime: null,
-    };
+      },
+    });
   });
+};
+
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+
+const computeSpeedScale = (speedAt, totalDuration, samples = 240) => {
+  let total = 0;
+  let prevTime = 0;
+  let prevSpeed = speedAt(0);
+
+  for (let i = 1; i <= samples; i++) {
+    const time = (totalDuration * i) / samples;
+    const speed = speedAt(time);
+    const dt = time - prevTime;
+    // trapezoidal integration
+    total += 0.5 * (prevSpeed + speed) * dt;
+    prevTime = time;
+    prevSpeed = speed;
+  }
+
+  return total > 0 ? 1 / total : 1;
+};
+
+const createSlideInSpeedProfile = (config, totalDuration) => {
+  const total = totalDuration;
+  const decelDur = total * config.decelTimeRatio;
+  const decelEase = gsap.parseEase(config.decelEase || "power3.out");
+  const slowEase = gsap.parseEase(config.slowEase || "none");
+
+  return (time) => {
+    if (time <= decelDur) {
+      const t = decelDur > 0 ? time / decelDur : 1;
+      const eased = decelEase(t);
+      return gsap.utils.interpolate(config.fastSpeed, config.slowSpeed, eased);
+    }
+    const remaining = total - decelDur;
+    const t = remaining > 0 ? (time - decelDur) / remaining : 1;
+    slowEase(t);
+    return config.slowSpeed;
+  };
+};
+
+const createSlideOutSpeedProfile = (config, totalDuration) => {
+  const total = totalDuration;
+  const slowDur = total * config.slowTimeRatio;
+  const accelDur = Math.max(0, total - slowDur);
+  const accelEase = gsap.parseEase(config.accelEase || "power3.in");
+
+  return (time) => {
+    if (time <= slowDur) {
+      return config.slowSpeed;
+    }
+    const t = accelDur > 0 ? (time - slowDur) / accelDur : 1;
+    const eased = accelEase(t);
+    return gsap.utils.interpolate(config.slowSpeed, config.fastSpeed, eased);
+  };
 };

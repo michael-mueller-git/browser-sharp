@@ -12,6 +12,7 @@ import { setLoadAnimationEnabled, setLoadAnimationIntensity, setLoadAnimationDir
 import { saveAnimationSettings, savePreviewBlob } from '../fileStorage';
 import { scene, renderer, composer, THREE, currentMesh } from '../viewer';
 import { startSlideshow, stopSlideshow } from '../slideshowController';
+import SlideshowDebugPanel from './SlideshowDebugPanel';
 
 const PREVIEW_TARGET_HEIGHT = 128;
 const PREVIEW_WEBP_QUALITY = 0.18;
@@ -62,6 +63,7 @@ function AnimationSettings() {
   const animationDirection = useStore((state) => state.animationDirection);
   const slideMode = useStore((state) => state.slideMode);
   const slideshowMode = useStore((state) => state.slideshowMode);
+  const slideshowUseCustom = useStore((state) => state.slideshowUseCustom);
   const slideshowDuration = useStore((state) => state.slideshowDuration);
   const slideshowPlaying = useStore((state) => state.slideshowPlaying);
   const animSettingsExpanded = useStore((state) => state.animSettingsExpanded);
@@ -74,6 +76,7 @@ function AnimationSettings() {
   const setAnimationDirectionStore = useStore((state) => state.setAnimationDirection);
   const setSlideModeStore = useStore((state) => state.setSlideMode);
   const setSlideshowModeStore = useStore((state) => state.setSlideshowMode);
+  const setSlideshowUseCustomStore = useStore((state) => state.setSlideshowUseCustom);
   const setSlideshowDurationStore = useStore((state) => state.setSlideshowDuration);
   const setCustomAnimation = useStore((state) => state.setCustomAnimation);
   const toggleAnimSettingsExpanded = useStore((state) => state.toggleAnimSettingsExpanded);
@@ -320,6 +323,21 @@ function AnimationSettings() {
           </label>
         </div>
 
+        {/* Slideshow custom transitions toggle */}
+        {slideshowMode && (
+          <div class="control-row animate-toggle-row">
+            <span class="control-label">Use Custom</span>
+            <label class="switch">
+              <input
+                type="checkbox"
+                checked={slideshowUseCustom}
+                onChange={(e) => setSlideshowUseCustomStore(e.target.checked)}
+              />
+              <span class="switch-track" aria-hidden="true" />
+            </label>
+          </div>
+        )}
+
         {/* Slideshow duration - only shown when slideshow mode is enabled */}
         {slideshowMode && (
           <div class="control-row">
@@ -367,6 +385,9 @@ function AnimationSettings() {
             </div>
           </div>
         )}
+
+        {/* Slideshow debug panel - bezier curve editor */}
+        <SlideshowDebugPanel slideMode={slideMode} visible={slideshowMode && slideshowUseCustom} />
 
         {/* Custom settings - only shown when style is 'custom' */}
         {animationIntensity === 'custom' && (

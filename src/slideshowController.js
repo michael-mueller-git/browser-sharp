@@ -45,27 +45,30 @@ export const stopSlideshow = () => {
  */
 const scheduleNextAdvance = () => {
   if (!isPlaying) return;
-  
+
   const holdDuration = getStoreState().slideshowDuration ?? 3;
-  
+
   if (holdTimeoutId) {
     clearTimeout(holdTimeoutId);
+    holdTimeoutId = null;
   }
-  
+
+  console.log(`[Slideshow] Scheduling next advance in ${holdDuration}s`);
+
   holdTimeoutId = setTimeout(async () => {
     if (!isPlaying) return;
-    
+
+    console.log(`[Slideshow] Hold complete, advancing to next asset`);
+
     try {
-      // Use existing loadNextAsset which handles all transitions
       await loadNextAsset();
-      
+
       // Schedule next advance after this one completes
       if (isPlaying) {
         scheduleNextAdvance();
       }
     } catch (err) {
       console.warn('Slideshow advance failed:', err);
-      // Try to continue anyway
       if (isPlaying) {
         scheduleNextAdvance();
       }

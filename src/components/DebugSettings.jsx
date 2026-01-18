@@ -9,6 +9,7 @@ import { faChevronDown } from '@fortawesome/free-solid-svg-icons';
 import { useStore } from '../store';
 import { captureCurrentAssetPreview, getAssetList, getCurrentAssetIndex } from '../assetManager';
 import { savePreviewBlob } from '../fileStorage';
+import { clearSupabaseManifestCache } from '../storage/supabaseSettings.js';
 import { generateAllPreviews, abortBatchPreview } from '../batchPreview';
 import { setDebugForceZoomOut } from '../fileLoader';
 
@@ -65,6 +66,7 @@ function DebugSettings() {
   const setBgBlur = useStore((state) => state.setBgBlur);
 
   const [wipingDb, setWipingDb] = useState(false);
+  const [clearingSupabaseCache, setClearingSupabaseCache] = useState(false);
   const [generatingPreview, setGeneratingPreview] = useState(false);
   const [batchProgress, setBatchProgress] = useState(null); // { current, total, name }
   const [generatingBatch, setGeneratingBatch] = useState(false);
@@ -113,6 +115,23 @@ function DebugSettings() {
       setWipingDb(false);
     }
   }, []);
+
+  /** Clears local Supabase manifest cache */
+  const handleClearSupabaseCache = useCallback(async () => {
+    const confirmed = window.confirm('Clear cached Supabase manifest data?');
+    if (!confirmed) return;
+
+    setClearingSupabaseCache(true);
+    try {
+      clearSupabaseManifestCache();
+      addLog('[Debug] Cleared Supabase manifest cache');
+    } catch (err) {
+      console.error('[Debug] Supabase cache clear failed:', err);
+      addLog(`[Debug] Supabase cache clear failed: ${err.message}`);
+    } finally {
+      setClearingSupabaseCache(false);
+    }
+  }, [addLog]);
 
   /** Debug: force regenerate preview for current asset */
   const handleRegeneratePreview = useCallback(async () => {
@@ -276,6 +295,18 @@ function DebugSettings() {
             disabled={wipingDb}
           >
             {wipingDb ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
+
+        <div class="control-row">
+          <span class="control-label">Clear Supabase cache</span>
+          <button
+            type="button"
+            class={`secondary ${clearingSupabaseCache ? 'is-busy' : ''}`}
+            onClick={handleClearSupabaseCache}
+            disabled={clearingSupabaseCache}
+          >
+            {clearingSupabaseCache ? 'Clearing...' : 'Clear'}
           </button>
         </div>
 

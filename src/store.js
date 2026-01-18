@@ -66,6 +66,7 @@ export const useStore = create(
   animationDirection: 'left',
   slideMode: 'horizontal',
   slideshowMode: false,
+  slideshowUseCustom: false,
   slideshowDuration: 3,
   slideshowPlaying: false,
   
@@ -168,6 +169,9 @@ export const useStore = create(
   
   /** Enables/disables slideshow mode */
   setSlideshowMode: (enabled) => set({ slideshowMode: enabled }),
+
+  /** Enables/disables custom slideshow transitions */
+  setSlideshowUseCustom: (enabled) => set({ slideshowUseCustom: enabled }),
   
   /** Sets slideshow hold duration in seconds */
   setSlideshowDuration: (duration) => set({ slideshowDuration: duration }),

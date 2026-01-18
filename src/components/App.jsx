@@ -15,7 +15,7 @@ import AssetNavigation from './AssetNavigation';
 import { initViewer, startRenderLoop, currentMesh } from '../viewer';
 import { resize, loadFromStorageSource, loadNextAsset, loadPrevAsset, handleMultipleFiles } from '../fileLoader';
 import { resetViewWithImmersive } from '../cameraUtils';
-import { setupFullscreenHandler } from '../fullscreenHandler';
+import { setupFullscreenHandler, moveElementsToFullscreen } from '../fullscreenHandler';
 import useOutsideClick from '../utils/useOutsideClick';
 import useSwipe from '../utils/useSwipe';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -79,6 +79,19 @@ function App() {
 
     return setupFullscreenHandler(viewerEl, controlsRef.current, setIsFullscreen);
   }, [hasMesh]); // Re-run when hasMesh changes (when controls appear/disappear)
+
+  // Ensure fullscreen UI elements are re-parented after orientation changes
+  // Use requestAnimationFrame to wait for React to render the new SidePanel/MobileSheet
+  useEffect(() => {
+    const viewerEl = document.getElementById('viewer');
+    if (!viewerEl) return;
+    if (document.fullscreenElement !== viewerEl) return;
+
+    const frameId = requestAnimationFrame(() => {
+      moveElementsToFullscreen(viewerEl, controlsRef.current);
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [isMobile, isPortrait, isFullscreen]);
 
   /**
    * Track mesh loading state with stability to prevent flickering.
@@ -219,7 +232,8 @@ function App() {
       await new Promise((r) => setTimeout(r, PANEL_TRANSITION_MS));
       let demo = getSource('demo-public-url');
       if (!demo) {
-        const demoUrls = [
+        // DEVNOTE: route demo collection to local public/demo_sog assets during development
+        const cloudUrls = [
           'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/_DSF1672.sog',
           'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/_DSF1749.sog',
           'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/_DSF1891.sog',
@@ -234,6 +248,36 @@ function App() {
           'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/PXL_20230822_061301870.sog',
           'https://xifbwkfsvurtuugvseqi.supabase.co/storage/v1/object/public/testbucket/sog_folder/PXL_20240307_200213904.sog',
         ];
+
+        const localUrls = [
+          '/demo_sog/_DSF1672.sog',
+          '/demo_sog/_DSF1749.sog',
+          '/demo_sog/_DSF1891.sog',
+          '/demo_sog/_DSF2158.sog',
+          '/demo_sog/_DSF2784.sog',
+          '/demo_sog/_DSF2810-Pano.sog',
+          '/demo_sog/_DSF3354.sog',
+          '/demo_sog/_DSF7664.sog',
+          '/demo_sog/20221007203015_IMG_0329.sog',
+          '/demo_sog/APC_0678.sog',
+          '/demo_sog/IMG_9728.sog',
+          '/demo_sog/PXL_20230822_061301870.sog',
+          '/demo_sog/PXL_20240307_200213904.sog',
+        ];
+
+        const checkUrlExists = async (url) => {
+          try {
+            const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+            return res.ok;
+          } catch {
+            return false;
+          }
+        };
+
+        const localExists = await Promise.all(localUrls.map(checkUrlExists));
+        const existingLocal = localUrls.filter((_, i) => localExists[i]);
+        const demoUrls = existingLocal.length > 0 ? existingLocal : cloudUrls;
+
         demo = createPublicUrlSource({ id: 'demo-public-url', name: 'Demo URL collection', assetPaths: demoUrls });
         registerSource(demo);
         try { await saveSource(demo.toJSON()); } catch (err) { console.warn('Failed to persist demo source:', err); }
@@ -254,17 +298,34 @@ function App() {
 
   /**
    * Detects mobile device and orientation.
+   * Uses orientationchange event and matchMedia for reliable mobile detection.
    */
   useEffect(() => {
     const updateMobileState = () => {
       const mobile = Math.min(window.innerWidth, window.innerHeight) <= 768;
-      const portrait = window.innerHeight > window.innerWidth;
+      // Prefer matchMedia for orientation as it's more reliable on mobile
+      const portraitQuery = window.matchMedia?.('(orientation: portrait)');
+      const portrait = portraitQuery ? portraitQuery.matches : window.innerHeight > window.innerWidth;
       setMobileState(mobile, portrait);
     };
     
     updateMobileState();
+
+    // Listen to resize as fallback
     window.addEventListener('resize', updateMobileState);
-    return () => window.removeEventListener('resize', updateMobileState);
+
+    // Dedicated orientation change event for mobile devices
+    window.addEventListener('orientationchange', updateMobileState);
+
+    // matchMedia change listener for orientation (most reliable)
+    const portraitQuery = window.matchMedia?.('(orientation: portrait)');
+    portraitQuery?.addEventListener?.('change', updateMobileState);
+
+    return () => {
+      window.removeEventListener('resize', updateMobileState);
+      window.removeEventListener('orientationchange', updateMobileState);
+      portraitQuery?.removeEventListener?.('change', updateMobileState);
+    };
   }, [setMobileState]);
 
   /**

@@ -7,6 +7,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { getSupportedExtensions } from '../formats/index.js';
+import { loadSupabaseManifestCache } from './supabaseSettings.js';
 
 // Reuse clients to avoid GoTrue multi-instance warnings
 const clientCache = new Map();
@@ -61,24 +62,27 @@ export async function listExistingCollections({ supabaseUrl, anonKey, bucket }) 
       const collectionId = folder.name;
       const basePath = `collections/${collectionId}`;
 
-      // Check for manifest
-      const { data: manifestData } = await storage.download(`${basePath}/manifest.json`);
-      const hasManifest = !!manifestData;
+      // Check for manifest without downloading it
+      const { data: manifestListing } = await storage.list(basePath, {
+        limit: 1,
+        search: 'manifest.json',
+      });
+      const hasManifest = Array.isArray(manifestListing)
+        ? manifestListing.some((item) => item?.name === 'manifest.json')
+        : false;
 
       let assetCount = 0;
       let collectionName = collectionId;
 
-      if (hasManifest) {
-        try {
-          const text = await manifestData.text();
-          const manifest = JSON.parse(text);
-          assetCount = manifest.assets?.length || 0;
-          if (manifest.name) collectionName = manifest.name;
-        } catch {
-          // ignore parse errors
-        }
+      const cachedManifest = hasManifest
+        ? loadSupabaseManifestCache({ supabaseUrl, bucket, collectionId })
+        : null;
+
+      if (cachedManifest) {
+        assetCount = cachedManifest.assets?.length || 0;
+        if (cachedManifest.name) collectionName = cachedManifest.name;
       } else {
-        // Count assets in assets/ folder
+        // Count assets in assets/ folder (metadata only)
         const { data: assetFiles } = await storage.list(`${basePath}/assets`, { limit: 500 });
         if (assetFiles) {
           assetCount = assetFiles.filter((f) => {

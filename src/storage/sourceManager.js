@@ -372,7 +372,7 @@ export const setDefaultSource = async (sourceId) => {
 
           const isDefault = sourceId !== null && config.id === sourceId;
           if (isDefault) {
-            found = true;c
+            found = true;
           }
 
           if (!!config.isDefault !== isDefault) {

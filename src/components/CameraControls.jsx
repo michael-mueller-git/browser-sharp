@@ -146,6 +146,11 @@ function CameraControls() {
 
   // Ref for camera range slider to avoid DOM queries
   const rangeSliderRef = useRef(null);
+  const lastSensitivityRef = useRef(immersiveSensitivity);
+
+  useEffect(() => {
+    lastSensitivityRef.current = immersiveSensitivity;
+  }, [immersiveSensitivity]);
   
   // Focus depth mode state
   const [focusMode, setFocusMode] = useState(FOCUS_MODE.IDLE);
@@ -516,13 +521,21 @@ function CameraControls() {
   const handleImmersiveSensitivityChange = useCallback((e) => {
     const value = Number.parseFloat(e.target.value);
     if (!Number.isFinite(value)) return;
+    const prevSensitivity = Number.isFinite(lastSensitivityRef.current)
+      ? lastSensitivityRef.current
+      : value;
+    const prevFloor = computeImmersiveRangeFloor(prevSensitivity);
+    const nextFloor = computeImmersiveRangeFloor(value);
+    lastSensitivityRef.current = value;
     setImmersiveSensitivity(value);
     setImmersiveSensitivityMultiplier(value);
     if (isImmersiveModeActive()) {
-      const boostedRange = enforceImmersiveRange(cameraRange, value);
-      if (boostedRange !== cameraRange) {
-        setCameraRange(boostedRange);
-        applyCameraRangeDegrees(boostedRange);
+      const delta = nextFloor - prevFloor;
+      const nextRange = clamp(cameraRange + delta, MIN_IMMERSIVE_RANGE_DEGREES, MAX_IMMERSIVE_RANGE_DEGREES);
+      const enforcedRange = enforceImmersiveRange(nextRange, value);
+      if (enforcedRange !== cameraRange) {
+        setCameraRange(enforcedRange);
+        applyCameraRangeDegrees(enforcedRange);
       }
     }
   }, [setImmersiveSensitivity, cameraRange, setCameraRange]);

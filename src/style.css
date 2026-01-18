@@ -1730,7 +1730,8 @@ select option {
   position: absolute;
   right: 0;
   top: 80px;
-  height: max(60vh, calc(100% - 300px));
+  max-height: calc(100% - 200px);
+  height: 800px;
   width: 70px;
   z-index: 9;
 }
@@ -1742,7 +1743,7 @@ select option {
   bottom: 0;
   height: 140px;
   max-height: 20vh;
-  z-index: 8;
+  z-index: 9;
   pointer-events: auto;
 }
 
@@ -2045,7 +2046,7 @@ select option {
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
-  z-index: 8;
+  z-index: 10;
   pointer-events: none; /* enable from children */
 }
 
@@ -2090,7 +2091,7 @@ select option {
 #viewer:fullscreen .bottom-controls,
 #viewer:-webkit-full-screen .bottom-controls {
   position: fixed;
-  z-index: 8;
+  z-index: 10;
 }
 
 /* Mobile fullscreen adjustments */
