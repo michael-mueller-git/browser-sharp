@@ -17,7 +17,7 @@
           version = "0.1.0";
           src = ./.;
           # npmDepsHash = pkgs.lib.fakeHash;
-          npmDepsHash = "sha256-Ql7dv8xfc+dbIKz6FV4VTjE41a1R1L392Au/flGLMpw=";
+          npmDepsHash = "sha256-ToG9eX0qy7l1a1s0JauJbs9WeDE4A9BP01n6wPeuIsA=";
           installPhase = ''
             runHook preInstall
             mkdir -p $out

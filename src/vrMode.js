@@ -1,4 +1,5 @@
-import { VRButton, XrHands } from "@sparkjsdev/spark";
+import { XrHands } from "@sparkjsdev/spark";
+import { VRButton } from "./vrButton.ts";
 import {
   renderer,
   camera,
@@ -274,29 +275,15 @@ const handleVrGamepadInput = (dt) => {
           lastPrevMs = now;
         }
       }
-    }
 
-    // ===== TRIGGERS FOR DEPTH (both controllers) =====
-    // Trigger pulls model closer, so we sum both triggers
-    const triggerValue = buttons[BTN_TRIGGER]?.value ?? 0;
-    if (currentMesh && triggerValue > 0.1) {
-      const currentScale = useStore.getState().vrModelScale || 1;
-      const scaledDepthSpeed = DEPTH_SPEED * currentScale;
-      // Pull model toward camera when trigger pressed
-      const depthDelta = -triggerValue * scaledDepthSpeed * dt;
-      currentMesh.position.addScaledVector(forward, depthDelta);
-      requestRender();
-    }
-
-    // Grip pushes model away
-    const gripValue = buttons[BTN_GRIP]?.value ?? 0;
-    if (currentMesh && gripValue > 0.1) {
-      const currentScale = useStore.getState().vrModelScale || 1;
-      const scaledDepthSpeed = DEPTH_SPEED * currentScale;
-      // Push model away from camera when grip pressed
-      const depthDelta = gripValue * scaledDepthSpeed * dt;
-      currentMesh.position.addScaledVector(forward, depthDelta);
-      requestRender();
+      const gripValue = buttons[BTN_GRIP]?.value ?? 0;
+      if (currentMesh && gripValue > 0.1) {
+        const currentScale = useStore.getState().vrModelScale || 1;
+        const scaledDepthSpeed = DEPTH_SPEED * currentScale;
+        const depthDelta = -gripValue * scaledDepthSpeed * dt;
+        currentMesh.position.addScaledVector(forward, depthDelta);
+        requestRender();
+      }
     }
 
     // ===== LEFT CONTROLLER =====
@@ -373,6 +360,15 @@ const handleVrGamepadInput = (dt) => {
           scaleModel(1 / SCALE_STEP);
           lastScaleDownMs = now;
         }
+      }
+
+      const gripValue = buttons[BTN_GRIP]?.value ?? 0;
+      if (currentMesh && gripValue > 0.1) {
+        const currentScale = useStore.getState().vrModelScale || 1;
+        const scaledDepthSpeed = DEPTH_SPEED * currentScale;
+        const depthDelta = gripValue * scaledDepthSpeed * dt;
+        currentMesh.position.addScaledVector(forward, depthDelta);
+        requestRender();
       }
     }
   }
@@ -459,7 +455,7 @@ export const initVrSupport = async (containerEl) => {
   try {
     vrButton = VRButton.createButton(renderer, {
       optionalFeatures: ["hand-tracking"],
-    });
+    }, "immersive-ar");
   } catch (err) {
     console.warn("VR button creation failed:", err);
     store.setVrSupported(false);
