@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { useStore } from '../store';
 import { camera, controls, defaultCamera, defaultControls, dollyZoomBaseDistance, dollyZoomBaseFov, requestRender, THREE, setStereoEffectEnabled, setStereoEyeSeparation, setStereoAspect as setStereoAspectRatio, getFocusDistance, calculateOptimalEyeSeparation } from '../viewer';
-import { applyCameraRangeDegrees, restoreHomeView, resetViewWithImmersive } from '../cameraUtils';
+import { applyCameraRangeDegrees, restoreHomeView, resetViewWithImmersive, applyAxisSwaps } from '../cameraUtils';
 import { currentMesh, raycaster, SplatMesh, scene } from '../viewer';
 import { updateDollyZoomBaselineFromCamera } from '../viewer';
 import { startAnchorTransition } from '../cameraAnimations';
@@ -142,6 +142,12 @@ function CameraControls() {
   const vrSupported = useStore((state) => state.vrSupported);
   const vrSessionActive = useStore((state) => state.vrSessionActive);
   const hasAssetLoaded = useStore((state) => state.fileInfo?.name && state.fileInfo.name !== '-');
+  const swapX = useStore((state) => state.swapX);
+  const swapY = useStore((state) => state.swapY);
+  const swapZ = useStore((state) => state.swapZ);
+  const setSwapX = useStore((state) => state.setSwapX);
+  const setSwapY = useStore((state) => state.setSwapY);
+  const setSwapZ = useStore((state) => state.setSwapZ);
 
   // Ref for camera range slider to avoid DOM queries
   const rangeSliderRef = useRef(null);
@@ -538,6 +544,14 @@ function CameraControls() {
     }
   }, [setImmersiveSensitivity, cameraRange, setCameraRange]);
 
+  // Apply axis swaps when toggles change or mesh changes
+  useEffect(() => {
+    if (currentMesh) {
+      applyAxisSwaps(currentMesh);
+      requestRender();
+    }
+  }, [swapX, swapY, swapZ, currentMesh]);
+
   /**
    * Resets view with immersive mode support.
    * Uses the shared function that pauses orientation input during animation.
@@ -805,6 +819,39 @@ function CameraControls() {
             </span>
           </div>
         </div>
+
+        {/* Axis swap toggles - only show when asset is loaded */}
+        {hasAssetLoaded && (
+          <div class="control-row">
+            <span class="control-label">Swap axes</span>
+            <div class="control-switches">
+              <label class="axis-swap-label">
+                <input
+                  type="checkbox"
+                  checked={swapX}
+                  onChange={(e) => setSwapX(e.target.checked)}
+                />
+                <span class="axis-swap-text">X</span>
+              </label>
+              <label class="axis-swap-label">
+                <input
+                  type="checkbox"
+                  checked={swapY}
+                  onChange={(e) => setSwapY(e.target.checked)}
+                />
+                <span class="axis-swap-text">Y</span>
+              </label>
+              <label class="axis-swap-label">
+                <input
+                  type="checkbox"
+                  checked={swapZ}
+                  onChange={(e) => setSwapZ(e.target.checked)}
+                />
+                <span class="axis-swap-text">Z</span>
+              </label>
+            </div>
+          </div>
+        )}
 
         {/* Action buttons */}
         <div class="settings-footer">

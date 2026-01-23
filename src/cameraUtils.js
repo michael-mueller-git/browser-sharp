@@ -303,6 +303,50 @@ export const fitViewToMesh = (mesh) => {
 export const makeAxisFlipCvToGl = () =>
   new THREE.Matrix4().set(1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1);
 
+/**
+ * Apply axis swap transformations to a mesh based on store state
+ */
+export const applyAxisSwaps = (mesh) => {
+  if (!mesh) return;
+
+  const store = getStoreState();
+  const { swapX, swapY, swapZ } = store;
+
+  // Check if we need to update swaps
+  const needsUpdate = !mesh.userData.__axisSwapApplied ||
+    mesh.userData.__lastSwapX !== swapX ||
+    mesh.userData.__lastSwapY !== swapY ||
+    mesh.userData.__lastSwapZ !== swapZ;
+
+  if (!needsUpdate) return;
+
+  // Remove previous swap if it was applied
+  if (mesh.userData.__axisSwapApplied) {
+    const inverseSwap = new THREE.Matrix4().makeScale(
+      mesh.userData.__lastSwapX ? -1 : 1,
+      mesh.userData.__lastSwapY ? -1 : 1,
+      mesh.userData.__lastSwapZ ? -1 : 1
+    ).invert();
+    mesh.applyMatrix4(inverseSwap);
+  }
+
+  // Apply new swap
+  const swapMatrix = new THREE.Matrix4().makeScale(
+    swapX ? -1 : 1,
+    swapY ? -1 : 1,
+    swapZ ? -1 : 1
+  );
+  mesh.applyMatrix4(swapMatrix);
+
+  // Mark as applied
+  mesh.userData.__axisSwapApplied = true;
+  mesh.userData.__lastSwapX = swapX;
+  mesh.userData.__lastSwapY = swapY;
+  mesh.userData.__lastSwapZ = swapZ;
+
+  mesh.updateMatrixWorld(true);
+};
+
 // Compute depth focus from splat distribution
 const quantileSorted = (sorted, q) => {
   if (!sorted.length) return null;
@@ -431,6 +475,10 @@ export const applyMetadataCamera = (mesh, cameraMetadata, resize) => {
     mesh.applyMatrix4(cvToThree);
     mesh.userData.__cvToThreeApplied = true;
   }
+
+  // Apply axis swap transformations
+  applyAxisSwaps(mesh);
+
   mesh.updateMatrixWorld(true);
 
   const e = cameraMetadata.extrinsicCv;

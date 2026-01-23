@@ -62,6 +62,9 @@ export const useStore = create(
   vrSupported: false,
   vrSessionActive: false,
   vrModelScale: 1,
+  swapX: false,
+  swapY: false,
+  swapZ: false,
 
   // Animation settings
   animationEnabled: true,
@@ -153,6 +156,16 @@ export const useStore = create(
 
   /** Sets stereo aspect ratio */
   setStereoAspect: (aspect) => set({ stereoAspect: aspect }),
+
+  /** Sets axis swap toggles */
+  setSwapX: (enabled) => set({ swapX: enabled }),
+  setSwapY: (enabled) => set({ swapY: enabled }),
+  setSwapZ: (enabled) => set({ swapZ: enabled }),
+
+  /** Toggles axis swap */
+  toggleSwapX: () => set((state) => ({ swapX: !state.swapX })),
+  toggleSwapY: () => set((state) => ({ swapY: !state.swapY })),
+  toggleSwapZ: () => set((state) => ({ swapZ: !state.swapZ })),
 
   /** Marks whether WebXR/VR is available */
   setVrSupported: (vrSupported) => set({ vrSupported }),
