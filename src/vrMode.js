@@ -23,6 +23,13 @@ let initialModelPosition = null;
 let initialModelQuaternion = null; // Store initial rotation
 let keyListenerAttached = false;
 
+// Controller tracking
+let xrControllers = [];
+const grabState = {
+  right: { active: false, relativePos: null, relativeQuat: null },
+  left: { active: false, relativePos: null, relativeQuat: null }
+};
+
 // Quest controller button indices (xr-standard mapping, per controller)
 const BTN_TRIGGER = 0;
 const BTN_GRIP = 1;
@@ -158,6 +165,38 @@ const removeHands = () => {
   }
 };
 
+const onControllerConnected = (event) => {
+  const controller = event.target;
+  controller.userData.handedness = event.data.handedness;
+};
+
+const onControllerDisconnected = (event) => {
+  const controller = event.target;
+  controller.userData.handedness = null;
+};
+
+const setupControllers = () => {
+  // Initialize controller objects
+  if (xrControllers.length === 0 && renderer?.xr) {
+    for (let i = 0; i < 2; i++) {
+      const controller = renderer.xr.getController(i);
+      controller.addEventListener('connected', onControllerConnected);
+      controller.addEventListener('disconnected', onControllerDisconnected);
+      xrControllers.push(controller);
+      scene.add(controller);
+    }
+  }
+};
+
+const removeControllers = () => {
+  xrControllers.forEach(c => {
+    c.removeEventListener('connected', onControllerConnected);
+    c.removeEventListener('disconnected', onControllerDisconnected);
+    scene.remove(c);
+  });
+  xrControllers = [];
+};
+
 const setupVrAnimationLoop = () => {
   if (!renderer) return;
   let lastTime = performance.now();
@@ -226,29 +265,53 @@ const handleVrGamepadInput = (dt) => {
 
     // ===== RIGHT CONTROLLER =====
     if (hand === "right") {
-      // Scale pan speed based on model scale - smaller models need slower panning
-      const currentScale = useStore.getState().vrModelScale || 1;
-      const scaledTranslateSpeed = TRANSLATE_SPEED * currentScale;
+      const controllerObject = xrControllers.find(c => c.userData.handedness === "right");
+      const gripValue = buttons[BTN_GRIP]?.value ?? 0;
+      const isGrabbing = gripValue > 0.5;
 
-      // Right thumbstick: pan model (inverted for intuitive "drag" feel)
-      if (currentMesh) {
-        const delta = new THREE.Vector3();
-        let moved = false;
-
-        if (Math.abs(stickX) > STICK_DEADZONE) {
-          // Invert: stick right moves model left for intuitive feel
-          delta.addScaledVector(right, -stickX * scaledTranslateSpeed * dt);
-          moved = true;
-        }
-        if (Math.abs(stickY) > STICK_DEADZONE) {
-          // Invert: stick up moves model down for intuitive feel
-          delta.addScaledVector(up, stickY * scaledTranslateSpeed * dt);
-          moved = true;
-        }
-
-        if (moved) {
-          currentMesh.position.add(delta);
+      // GRAB LOGIC (Overrides thumbstick panning)
+      if (currentMesh && controllerObject && isGrabbing) {
+        if (!grabState.right.active) {
+          // Start grab: Store relationship
+          grabState.right.active = true;
+          grabState.right.relativePos = controllerObject.worldToLocal(currentMesh.position.clone());
+          grabState.right.relativeQuat = controllerObject.quaternion.clone().invert().multiply(currentMesh.quaternion);
+        } else {
+          // Maintain grab: Apply transform
+          const newPos = controllerObject.localToWorld(grabState.right.relativePos.clone());
+          const newQuat = controllerObject.quaternion.clone().multiply(grabState.right.relativeQuat);
+          currentMesh.position.copy(newPos);
+          currentMesh.quaternion.copy(newQuat);
           requestRender();
+        }
+      } else {
+        grabState.right.active = false;
+
+        // THUMBSTICK PANNING (Only if not grabbing)
+        // Scale pan speed based on model scale - smaller models need slower panning
+        const currentScale = useStore.getState().vrModelScale || 1;
+        const scaledTranslateSpeed = TRANSLATE_SPEED * currentScale;
+
+        // Right thumbstick: pan model (inverted for intuitive "drag" feel)
+        if (currentMesh) {
+          const delta = new THREE.Vector3();
+          let moved = false;
+
+          if (Math.abs(stickX) > STICK_DEADZONE) {
+            // Invert: stick right moves model left for intuitive feel
+            delta.addScaledVector(right, -stickX * scaledTranslateSpeed * dt);
+            moved = true;
+          }
+          if (Math.abs(stickY) > STICK_DEADZONE) {
+            // Invert: stick up moves model down for intuitive feel
+            delta.addScaledVector(up, stickY * scaledTranslateSpeed * dt);
+            moved = true;
+          }
+
+          if (moved) {
+            currentMesh.position.add(delta);
+            requestRender();
+          }
         }
       }
 
@@ -275,66 +338,77 @@ const handleVrGamepadInput = (dt) => {
           lastPrevMs = now;
         }
       }
-
-      const gripValue = buttons[BTN_GRIP]?.value ?? 0;
-      if (currentMesh && gripValue > 0.1) {
-        const currentScale = useStore.getState().vrModelScale || 1;
-        const scaledDepthSpeed = DEPTH_SPEED * currentScale;
-        const depthDelta = -gripValue * scaledDepthSpeed * dt;
-        currentMesh.position.addScaledVector(forward, depthDelta);
-        requestRender();
-      }
     }
 
     // ===== LEFT CONTROLLER =====
     if (hand === "left") {
-      if (currentMesh) {
-        // Get rotation pivot point (use model center or controls target)
-        const pivot = controls?.target?.clone() ?? currentMesh.position.clone();
+      const controllerObject = xrControllers.find(c => c.userData.handedness === "left");
+      const gripValue = buttons[BTN_GRIP]?.value ?? 0;
+      const isGrabbing = gripValue > 0.5;
 
-        const absX = Math.abs(stickX);
-        const absY = Math.abs(stickY);
-        const stickMagnitude = Math.sqrt(stickX * stickX + stickY * stickY);
-
-        // Determine axis lock when stick first deflects past threshold
-        if (stickMagnitude < STICK_DEADZONE) {
-          // Stick returned to center, release lock
-          lockedRotationAxis = null;
-        } else if (lockedRotationAxis === null && stickMagnitude > AXIS_LOCK_THRESHOLD) {
-          // Lock to whichever axis has greater deflection
-          lockedRotationAxis = absX > absY ? 'x' : 'y';
-        }
-
-        // Left thumbstick X: rotate model around world Y axis (horizontal spin)
-        // Flipped: Stick right = rotate counter-clockwise, stick left = clockwise
-        if (lockedRotationAxis === 'x' && absX > STICK_DEADZONE) {
-          const rotationAmount = stickX * ROTATION_SPEED * dt; // flipped direction
-          
-          // Rotate model around the pivot on world Y axis
-          const offset = currentMesh.position.clone().sub(pivot);
-          offset.applyAxisAngle(up, rotationAmount);
-          currentMesh.position.copy(pivot).add(offset);
-          
-          // Also rotate the model itself so it spins in place relative to pivot
-          currentMesh.rotateOnWorldAxis(up, rotationAmount);
-          
+      if (currentMesh && controllerObject && isGrabbing) {
+        if (!grabState.left.active) {
+          grabState.left.active = true;
+          grabState.left.relativePos = controllerObject.worldToLocal(currentMesh.position.clone());
+          grabState.left.relativeQuat = controllerObject.quaternion.clone().invert().multiply(currentMesh.quaternion);
+        } else {
+          const newPos = controllerObject.localToWorld(grabState.left.relativePos.clone());
+          const newQuat = controllerObject.quaternion.clone().multiply(grabState.left.relativeQuat);
+          currentMesh.position.copy(newPos);
+          currentMesh.quaternion.copy(newQuat);
           requestRender();
         }
+      } else {
+        grabState.left.active = false;
 
-        // Left thumbstick Y: rotate model around right axis (vertical tilt/pitch)
-        // Flipped: Stick forward = tilt backward, stick back = tilt forward
-        if (lockedRotationAxis === 'y' && absY > STICK_DEADZONE) {
-          const rotationAmount = -stickY * ROTATION_SPEED * dt; // flipped direction
-          
-          // Rotate model around the pivot on the right axis (pitch)
-          const offset = currentMesh.position.clone().sub(pivot);
-          offset.applyAxisAngle(right, rotationAmount);
-          currentMesh.position.copy(pivot).add(offset);
-          
-          // Also rotate the model itself
-          currentMesh.rotateOnWorldAxis(right, rotationAmount);
-          
-          requestRender();
+        if (currentMesh) {
+          // Get rotation pivot point (use model center or controls target)
+          const pivot = controls?.target?.clone() ?? currentMesh.position.clone();
+
+          const absX = Math.abs(stickX);
+          const absY = Math.abs(stickY);
+          const stickMagnitude = Math.sqrt(stickX * stickX + stickY * stickY);
+
+          // Determine axis lock when stick first deflects past threshold
+          if (stickMagnitude < STICK_DEADZONE) {
+            // Stick returned to center, release lock
+            lockedRotationAxis = null;
+          } else if (lockedRotationAxis === null && stickMagnitude > AXIS_LOCK_THRESHOLD) {
+            // Lock to whichever axis has greater deflection
+            lockedRotationAxis = absX > absY ? 'x' : 'y';
+          }
+
+          // Left thumbstick X: rotate model around world Y axis (horizontal spin)
+          // Flipped: Stick right = rotate counter-clockwise, stick left = clockwise
+          if (lockedRotationAxis === 'x' && absX > STICK_DEADZONE) {
+            const rotationAmount = stickX * ROTATION_SPEED * dt; // flipped direction
+            
+            // Rotate model around the pivot on world Y axis
+            const offset = currentMesh.position.clone().sub(pivot);
+            offset.applyAxisAngle(up, rotationAmount);
+            currentMesh.position.copy(pivot).add(offset);
+            
+            // Also rotate the model itself so it spins in place relative to pivot
+            currentMesh.rotateOnWorldAxis(up, rotationAmount);
+            
+            requestRender();
+          }
+
+          // Left thumbstick Y: rotate model around right axis (vertical tilt/pitch)
+          // Flipped: Stick forward = tilt backward, stick back = tilt forward
+          if (lockedRotationAxis === 'y' && absY > STICK_DEADZONE) {
+            const rotationAmount = -stickY * ROTATION_SPEED * dt; // flipped direction
+            
+            // Rotate model around the pivot on the right axis (pitch)
+            const offset = currentMesh.position.clone().sub(pivot);
+            offset.applyAxisAngle(right, rotationAmount);
+            currentMesh.position.copy(pivot).add(offset);
+            
+            // Also rotate the model itself
+            currentMesh.rotateOnWorldAxis(right, rotationAmount);
+            
+            requestRender();
+          }
         }
       }
 
@@ -360,15 +434,6 @@ const handleVrGamepadInput = (dt) => {
           scaleModel(1 / SCALE_STEP);
           lastScaleDownMs = now;
         }
-      }
-
-      const gripValue = buttons[BTN_GRIP]?.value ?? 0;
-      if (currentMesh && gripValue > 0.1) {
-        const currentScale = useStore.getState().vrModelScale || 1;
-        const scaledDepthSpeed = DEPTH_SPEED * currentScale;
-        const depthDelta = gripValue * scaledDepthSpeed * dt;
-        currentMesh.position.addScaledVector(forward, depthDelta);
-        requestRender();
       }
     }
   }
@@ -401,6 +466,7 @@ const handleSessionStart = () => {
   initialModelQuaternion = currentMesh?.quaternion?.clone() ?? null; // Store initial rotation
   store.setVrModelScale(1);
   ensureHands();
+  setupControllers();
   setupVrAnimationLoop();
 
   if (!keyListenerAttached) {
@@ -417,6 +483,7 @@ const handleSessionEnd = () => {
   if (controls) controls.enabled = true;
   restoreModelTransform();
   removeHands();
+  removeControllers();
   if (keyListenerAttached) {
     window.removeEventListener("keydown", handleScaleKeydown);
     keyListenerAttached = false;
