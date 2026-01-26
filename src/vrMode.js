@@ -240,13 +240,7 @@ const handleVrGamepadInput = (dt) => {
   if (!session) return;
 
   const now = performance.now();
-
-  // Get camera vectors for movement relative to view
-  const forward = new THREE.Vector3();
-  const right = new THREE.Vector3();
-  const up = new THREE.Vector3(0, 1, 0);
-  camera.getWorldDirection(forward).normalize();
-  right.crossVectors(forward, up).normalize();
+  const ANALOG_SCALE_SPEED = 2.0;
 
   for (const source of session.inputSources) {
     const gp = source?.gamepad;
@@ -257,184 +251,86 @@ const handleVrGamepadInput = (dt) => {
     const buttons = gp.buttons || [];
 
     // Get thumbstick values (axes 2 and 3 for xr-standard)
-    const stickX = axes[AXIS_THUMBSTICK_X] ?? 0;
     const stickY = axes[AXIS_THUMBSTICK_Y] ?? 0;
 
     // Button helpers
     const isPressed = (idx) => buttons[idx]?.pressed ?? false;
 
-    // ===== RIGHT CONTROLLER =====
-    if (hand === "right") {
-      const controllerObject = xrControllers.find(c => c.userData.handedness === "right");
-      const gripValue = buttons[BTN_GRIP]?.value ?? 0;
-      const isGrabbing = gripValue > 0.5;
+    const controllerObject = xrControllers.find(c => c.userData.handedness === hand);
+    const gripValue = buttons[BTN_GRIP]?.value ?? 0;
+    const isGrabbing = gripValue > 0.5;
 
-      // GRAB LOGIC (Overrides thumbstick panning)
-      if (currentMesh && controllerObject && isGrabbing) {
-        if (!grabState.right.active) {
-          // Start grab: Store relationship
-          grabState.right.active = true;
-          grabState.right.relativePos = controllerObject.worldToLocal(currentMesh.position.clone());
-          grabState.right.relativeQuat = controllerObject.quaternion.clone().invert().multiply(currentMesh.quaternion);
-        } else {
-          // Maintain grab: Apply transform
-          const newPos = controllerObject.localToWorld(grabState.right.relativePos.clone());
-          const newQuat = controllerObject.quaternion.clone().multiply(grabState.right.relativeQuat);
-          currentMesh.position.copy(newPos);
-          currentMesh.quaternion.copy(newQuat);
-          requestRender();
-        }
+    // GRAB LOGIC
+    if (currentMesh && controllerObject && isGrabbing) {
+      if (!grabState[hand].active) {
+        // Start grab: Store relationship
+        grabState[hand].active = true;
+        grabState[hand].relativePos = controllerObject.worldToLocal(currentMesh.position.clone());
+        grabState[hand].relativeQuat = controllerObject.quaternion.clone().invert().multiply(currentMesh.quaternion);
       } else {
-        grabState.right.active = false;
-
-        // THUMBSTICK PANNING (Only if not grabbing)
-        // Scale pan speed based on model scale - smaller models need slower panning
-        const currentScale = useStore.getState().vrModelScale || 1;
-        const scaledTranslateSpeed = TRANSLATE_SPEED * currentScale;
-
-        // Right thumbstick: pan model (inverted for intuitive "drag" feel)
-        if (currentMesh) {
-          const delta = new THREE.Vector3();
-          let moved = false;
-
-          if (Math.abs(stickX) > STICK_DEADZONE) {
-            // Invert: stick right moves model left for intuitive feel
-            delta.addScaledVector(right, -stickX * scaledTranslateSpeed * dt);
-            moved = true;
-          }
-          if (Math.abs(stickY) > STICK_DEADZONE) {
-            // Invert: stick up moves model down for intuitive feel
-            delta.addScaledVector(up, stickY * scaledTranslateSpeed * dt);
-            moved = true;
-          }
-
-          if (moved) {
-            currentMesh.position.add(delta);
-            requestRender();
-          }
-        }
+        // Maintain grab: Apply transform
+        const newPos = controllerObject.localToWorld(grabState[hand].relativePos.clone());
+        const newQuat = controllerObject.quaternion.clone().multiply(grabState[hand].relativeQuat);
+        currentMesh.position.copy(newPos);
+        currentMesh.quaternion.copy(newQuat);
+        requestRender();
       }
+    } else {
+      grabState[hand].active = false;
 
-      // Right thumbstick click: reset camera and model
-      if (isPressed(BTN_THUMBSTICK)) {
-        if (now - lastResetMs > BUTTON_COOLDOWN_MS) {
-          performVrReset();
-          lastResetMs = now;
-        }
+      // THUMBSTICK SCALING (When not grabbing)
+      if (Math.abs(stickY) > STICK_DEADZONE) {
+        // stickY is -1 for Up (increase), 1 for Down (decrease)
+        // Invert stickY so Up is positive factor
+        const direction = -stickY;
+        const factor = 1.0 + (direction * ANALOG_SCALE_SPEED * dt);
+        scaleModel(factor);
       }
+    }
 
-      // B button: next image
-      if (isPressed(BTN_B_OR_Y)) {
-        if (now - lastNextMs > BUTTON_COOLDOWN_MS) {
-          loadNextAsset();
-          lastNextMs = now;
-        }
-      }
-
-      // A button: previous image
-      if (isPressed(BTN_A_OR_X)) {
-        if (now - lastPrevMs > BUTTON_COOLDOWN_MS) {
-          loadPrevAsset();
-          lastPrevMs = now;
+    // Thumbstick click: reset
+    if (isPressed(BTN_THUMBSTICK)) {
+      if (now - lastResetMs > BUTTON_COOLDOWN_MS) {
+        if (hand === "left") {
+             resetRotationOnly();
+             lastRotResetMs = now;
+        } else {
+             performVrReset();
+             lastResetMs = now;
         }
       }
     }
 
-    // ===== LEFT CONTROLLER =====
-    if (hand === "left") {
-      const controllerObject = xrControllers.find(c => c.userData.handedness === "left");
-      const gripValue = buttons[BTN_GRIP]?.value ?? 0;
-      const isGrabbing = gripValue > 0.5;
-
-      if (currentMesh && controllerObject && isGrabbing) {
-        if (!grabState.left.active) {
-          grabState.left.active = true;
-          grabState.left.relativePos = controllerObject.worldToLocal(currentMesh.position.clone());
-          grabState.left.relativeQuat = controllerObject.quaternion.clone().invert().multiply(currentMesh.quaternion);
-        } else {
-          const newPos = controllerObject.localToWorld(grabState.left.relativePos.clone());
-          const newQuat = controllerObject.quaternion.clone().multiply(grabState.left.relativeQuat);
-          currentMesh.position.copy(newPos);
-          currentMesh.quaternion.copy(newQuat);
-          requestRender();
-        }
-      } else {
-        grabState.left.active = false;
-
-        if (currentMesh) {
-          // Get rotation pivot point (use model center or controls target)
-          const pivot = controls?.target?.clone() ?? currentMesh.position.clone();
-
-          const absX = Math.abs(stickX);
-          const absY = Math.abs(stickY);
-          const stickMagnitude = Math.sqrt(stickX * stickX + stickY * stickY);
-
-          // Determine axis lock when stick first deflects past threshold
-          if (stickMagnitude < STICK_DEADZONE) {
-            // Stick returned to center, release lock
-            lockedRotationAxis = null;
-          } else if (lockedRotationAxis === null && stickMagnitude > AXIS_LOCK_THRESHOLD) {
-            // Lock to whichever axis has greater deflection
-            lockedRotationAxis = absX > absY ? 'x' : 'y';
-          }
-
-          // Left thumbstick X: rotate model around world Y axis (horizontal spin)
-          // Flipped: Stick right = rotate counter-clockwise, stick left = clockwise
-          if (lockedRotationAxis === 'x' && absX > STICK_DEADZONE) {
-            const rotationAmount = stickX * ROTATION_SPEED * dt; // flipped direction
-            
-            // Rotate model around the pivot on world Y axis
-            const offset = currentMesh.position.clone().sub(pivot);
-            offset.applyAxisAngle(up, rotationAmount);
-            currentMesh.position.copy(pivot).add(offset);
-            
-            // Also rotate the model itself so it spins in place relative to pivot
-            currentMesh.rotateOnWorldAxis(up, rotationAmount);
-            
-            requestRender();
-          }
-
-          // Left thumbstick Y: rotate model around right axis (vertical tilt/pitch)
-          // Flipped: Stick forward = tilt backward, stick back = tilt forward
-          if (lockedRotationAxis === 'y' && absY > STICK_DEADZONE) {
-            const rotationAmount = -stickY * ROTATION_SPEED * dt; // flipped direction
-            
-            // Rotate model around the pivot on the right axis (pitch)
-            const offset = currentMesh.position.clone().sub(pivot);
-            offset.applyAxisAngle(right, rotationAmount);
-            currentMesh.position.copy(pivot).add(offset);
-            
-            // Also rotate the model itself
-            currentMesh.rotateOnWorldAxis(right, rotationAmount);
-            
-            requestRender();
-          }
-        }
-      }
-
-      // Left thumbstick click: reset rotation only
-      if (isPressed(BTN_THUMBSTICK)) {
-        if (now - lastRotResetMs > BUTTON_COOLDOWN_MS) {
-          resetRotationOnly();
-          lastRotResetMs = now;
-        }
-      }
-
-      // Y button (BTN_B_OR_Y on left = Y): scale up
-      if (isPressed(BTN_B_OR_Y)) {
-        if (now - lastScaleUpMs > BUTTON_COOLDOWN_MS) {
-          scaleModel(SCALE_STEP);
-          lastScaleUpMs = now;
-        }
-      }
-
-      // X button (BTN_A_OR_X on left = X): scale down
-      if (isPressed(BTN_A_OR_X)) {
-        if (now - lastScaleDownMs > BUTTON_COOLDOWN_MS) {
-          scaleModel(1 / SCALE_STEP);
-          lastScaleDownMs = now;
-        }
-      }
+    // Keep A/B/X/Y buttons for discrete scaling or asset navigation
+    if (hand === "right") {
+       // B button: next image
+       if (isPressed(BTN_B_OR_Y)) {
+         if (now - lastNextMs > BUTTON_COOLDOWN_MS) {
+           loadNextAsset();
+           lastNextMs = now;
+         }
+       }
+       // A button: previous image
+       if (isPressed(BTN_A_OR_X)) {
+         if (now - lastPrevMs > BUTTON_COOLDOWN_MS) {
+           loadPrevAsset();
+           lastPrevMs = now;
+         }
+       }
+    } else if (hand === "left") {
+       // Y/X for discrete scaling (optional, but keeping as backup)
+       if (isPressed(BTN_B_OR_Y)) {
+         if (now - lastScaleUpMs > BUTTON_COOLDOWN_MS) {
+           scaleModel(SCALE_STEP);
+           lastScaleUpMs = now;
+         }
+       }
+       if (isPressed(BTN_A_OR_X)) {
+         if (now - lastScaleDownMs > BUTTON_COOLDOWN_MS) {
+           scaleModel(1 / SCALE_STEP);
+           lastScaleDownMs = now;
+         }
+       }
     }
   }
 };
