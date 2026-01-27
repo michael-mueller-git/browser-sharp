@@ -21,3 +21,50 @@ nix run
 Then open `http://127.0.0.1:4173`
 
 Hint: VR Mode does only work via `https`.
+
+
+## Build App
+
+```sh
+git checkout android-app
+keytool -genkeypair -v \
+  -keystore myapp-release.keystore \
+  -alias myapp-key-alias \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 10000
+```
+
+add keystore to `capacitor.config.ts`:
+
+```
+const config: CapacitorConfig = {
+  android: {
+    allowMixedContent: true,
+    webContentsDebuggingEnabled: true,
+    webViewVersion: 'latest',
+    buildOptions: {
+      keystorePath: '../myapp-release.keystore',
+      keystorePassword: '123456',
+      keystoreAlias: 'myapp-key-alias',
+      keystoreAliasPassword: '123456',
+      signingType: 'apksigner'
+    }
+  }
+}
+```
+
+then continue with:
+
+```sh
+docker run --rm -v $PWD:/workdir -it --entrypoint /bin/bash ghcr.io/michael-mueller-git/docker-capacitor:dev
+export PATH=$PATH:/opt/android-sdk/build-tools/34.0.0
+npm install
+npm run build
+npx cap sync
+chmod +x ./android/gradlew
+npx cap build android --androidreleasetype APK
+exit
+cd android/app/build/outputs/apk/release
+adb install -g -r app-release-signed.apk
+```
